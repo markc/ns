@@ -1,0 +1,18 @@
+# .sh/etc/_etc_nginx_sites-enables__localhost 20170515 - 20170715
+# Copyright (C) 2015-2018 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+server {
+    listen 127.0.0.1:81;
+    location ~ \.cgi$ {
+#        root /usr/lib/cgi-bin;
+        root /usr/share/mailgraph;
+        include /etc/nginx/fastcgi_params;
+        fastcgi_pass unix:/var/run/fcgiwrap.socket;
+    }
+    location /nginx-status {
+        stub_status on;
+        access_log off;
+        allow 127.0.0.1;
+        deny all;
+    }
+}

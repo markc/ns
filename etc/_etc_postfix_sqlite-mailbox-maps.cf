@@ -1,0 +1,2 @@
+dbpath = _DPATH
+query = SELECT 1 FROM vmails WHERE user='%s'

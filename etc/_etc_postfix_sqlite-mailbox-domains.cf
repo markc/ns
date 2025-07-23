@@ -1,0 +1,2 @@
+dbpath = _DPATH
+query = SELECT 1 FROM vhosts WHERE domain='%s' AND active=1

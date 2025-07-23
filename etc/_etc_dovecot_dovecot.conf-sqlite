@@ -1,0 +1,14 @@
+# .sh/etc/_etc_dovecot_dovecot.conf-sqlite 20170101 - 20170501
+# Copyright (C) 2015-2018 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+#dict {
+#  sqlquota = sqlite:/etc/dovecot/dist-sqlite.conf
+#}
+passdb {
+  args = /etc/dovecot/user-sqlite.conf
+  driver = sql
+}
+userdb {
+  args = /etc/dovecot/user-sqlite.conf
+  driver = sql
+}

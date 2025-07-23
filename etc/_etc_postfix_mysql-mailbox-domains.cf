@@ -1,0 +1,5 @@
+dbname = _DNAME
+hosts = _DHOST
+password = _DPASS
+user = _DUSER
+query = SELECT 1 FROM vhosts WHERE domain='%s' AND active=1

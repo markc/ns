@@ -1,0 +1,6 @@
+# .sh/etc/_etc_postfix_main_sqlite.cf 20170101 - 20200905
+# Copyright (C) 2015-2020 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+virtual_alias_maps = sqlite:/etc/postfix/sqlite-alias-maps.cf
+virtual_mailbox_domains = sqlite:/etc/postfix/sqlite-mailbox-domains.cf
+virtual_mailbox_maps = sqlite:/etc/postfix/sqlite-mailbox-maps.cf

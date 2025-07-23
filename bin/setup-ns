@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Created: 20170319 - Updated: 20250407
+# Copyright (C) 1995-2025 Mark Constable <markc@renta.net> (AGPL-3.0)
+if [[ -d ~/.sh ]]; then
+    echo "Update NetServa SH scripts"
+    ~/.sh/bin/shm pull
+elif [[ ! -e /usr/bin/git ]]; then
+    echo "Please install the git package" && exit 1
+else
+    echo "Setup NetServa SH scripts"
+    cd && git clone -q --depth 1 https://github.com/netserva/sh .sh
+    ~/.sh/bin/shm install
+    ~/.sh/bin/shm perms
+    git config --global pull.rebase false
+    echo "Type '. ~/.shrc' to initialize the system"
+    echo "and 'gethost' to view default ENV variables"
+fi

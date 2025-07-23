@@ -1,0 +1,6 @@
+#smtpd_sasl_type = dovecot
+#virtual_transport = lmtp:unix:private/dovecot-lmtp
+
+mailbox_transport = lmtp:unix:/run/cyrus/socket/lmtp
+smtpd_sasl_path = /etc/cyrus/smtpd.conf
+virtual_transport = lmtp:unix:/run/cyrus/socket/lmtp

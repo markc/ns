@@ -1,0 +1,21 @@
+# .sh/etc/_etc_nginx_sites-enables__default.nossl 20170515 - 20220515
+# Copyright (C) 2015-2018 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+server {
+    listen                      80;
+    server_name                 ~^cdn\.(?<domain>.+)$;
+    location                    ^~ /.well-known { root /home/u/$host/var/www/html; }
+    include                     /etc/nginx/common.conf;
+}
+server {
+    listen                      80;
+    server_name                 ~^www\.(?<domain>.+)$;
+    location                    ^~ /.well-known { root /home/u/$host/var/www/html; }
+    include                     /etc/nginx/common.conf;
+}
+server {
+    listen                      80;
+    server_name                 ~^(?<domain>.+);
+    location                    ^~ /.well-known { root /home/u/$host/var/www/html; }
+    include                     /etc/nginx/common.conf;
+}

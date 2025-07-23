@@ -1,0 +1,18 @@
+# .sh/etc/_etc_nginx_sites-enables__default 20170515 - 20210228
+# Copyright (C) 2015-2021 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+server {
+    listen                      80;
+    server_name                 _;
+    location                    ^~ /.well-known/acme-challenge/ { root /home/u/_MHOST/var/www/html; break; }
+    location                    ~* (/.well-known/autoconfig/|/mail/config-v1.1.xml|/autodiscover/autodiscover.xml) {
+        root                    /home/u/_MHOST/var/www/html/.well-known/;
+        try_files               /autodiscover.php =404;
+        fastcgi_pass            unix:/home/u/_MHOST/var/run/fpm.sock;
+        include                 fastcgi.conf;
+        fastcgi_param           SERVER_ADDR "";
+        fastcgi_param           REMOTE_ADDR $http_x_real_ip;
+        break;
+    }
+    location                    / { return 301 https://$host$request_uri; }
+}

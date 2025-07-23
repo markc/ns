@@ -1,0 +1,2 @@
+dbpath = _DPATH
+query = SELECT target FROM valias WHERE source='%s'

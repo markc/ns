@@ -1,0 +1,6 @@
+# .sh/etc/_etc_postfix_main_mysql.cf 20170101 - 20200905
+# Copyright (C) 2015-2020 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+virtual_alias_maps = proxy:mysql:/etc/postfix/mysql-alias-maps.cf
+virtual_mailbox_domains = proxy:mysql:/etc/postfix/mysql-mailbox-domains.cf
+virtual_mailbox_maps = proxy:mysql:/etc/postfix/mysql-mailbox-maps.cf
