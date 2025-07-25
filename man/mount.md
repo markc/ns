@@ -6,57 +6,64 @@ ns mount [OPTIONS] <system-name> [remote-path]
 ```
 
 ## Description
-Mount local LXC containers or remote systems via SSHFS for easy file access.
+Mount any SSH-accessible system via SSHFS for easy file access.
 
-The mount system automatically detects whether the target is a local container or remote system and uses the appropriate mounting method.
+The mount command works with any system that has been configured in SSH via `sshm` or has a configuration file in `~/.ssh/config.d/`. This unified approach means local containers, remote VMs, and VPS servers are all accessed the same way through SSH.
 
 ## Arguments
-- **system-name**: Name of container or remote host (must exist in SSH config)
+- **system-name**: Name of the SSH host (must exist in SSH config)
 - **remote-path**: Remote path to mount (default: root filesystem `/`)
 
 ## Options
-- `-t, --type TYPE`: Force type detection ('container' or 'remote')
 - `-p, --path PATH`: Custom local mount point (default: `mnt/<system-name>`)
-- `-u, --user USER`: SSH user for remote systems (default: root)
-- `--remote-path PATH`: Alternative way to specify remote path
-- `--dry-run`: Show what would be done without executing
+- `-h, --help`: Show help message
 
 ## Examples
 
 ### Basic Usage
 ```bash
-# Mount local container 'mgo'
+# Mount system 'mgo' (could be container, VM, or VPS)
 ns mount mgo
 
-# Mount remote system 'mko' 
+# Mount system 'mko' 
 ns mount mko
 
-# Mount specific remote directory
+# Mount specific directory from 'mko'
 ns mount mko /var/www
 ```
 
 ### Advanced Options
 ```bash
-# Force remote system type
-ns mount -t remote webserver
+# Use custom mount point
+ns mount -p /tmp/myserver mko
 
-# Custom mount point and user
-ns mount -p /tmp/myserver -u admin webserver
-
-# Test what would happen
-ns mount --dry-run mko
+# Mount web directory with custom path
+ns mount -p /tmp/web mko /var/www/html
 ```
 
-## Auto-Detection Logic
-- Checks if system name matches local incus containers
-- Falls back to SSH-based remote mounting
-- Uses SSH config from `~/.ssh/config.d/`
+## How It Works
+1. Checks if the SSH host exists in `~/.ssh/config.d/<system-name>` or main SSH config
+2. Tests SSH connectivity to ensure the host is reachable
+3. Creates mount point directory if it doesn't exist
+4. Uses SSHFS with optimized options for performance and reliability
+5. Caches files locally for faster subsequent access
+
+## Prerequisites
+- **sshfs**: Install with `sudo pacman -S sshfs` (or equivalent for your OS)
+- **SSH configuration**: Host must be configured via `sshm create` or exist in SSH config
+- **Key authentication**: Password-less SSH access must be configured
 
 ## Mount Location
-All systems mount under `mnt/<system-name>/` by default.
+All systems mount under `mnt/<system-name>/` by default, relative to your current directory.
+
+## Performance Notes
+- Files are cached locally for faster access
+- Automatic reconnection on network interruptions
+- Optimized for both local and remote connections
 
 ## Related Commands
 - `ns mounts` - List currently mounted systems
 - `ns unmount <system>` - Unmount a system
 - `ns remount <system>` - Refresh mount connection
-- `ns ssh list` - Show available SSH hosts
+- `sshm list` - Show available SSH hosts
+- `sshm create <name> <host>` - Add new SSH host configuration

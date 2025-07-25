@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Created: 20250721 - Updated: 20250721
+# Copyright (C) 1995-2025 Mark Constable <mc@netserva.org> (MIT License)
+# NetServa interactive documentation browser
+
+# Script directory and root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NSDIR="$(dirname "$SCRIPT_DIR")"
+export NSDIR
+
+# Default to doc/README.md if no argument provided
+DOC_PATH="${1:-doc/README.md}"
+
+# Convert to absolute path if relative
+if [[ ! "$DOC_PATH" =~ ^/ ]]; then
+    if [[ -f "$NSDIR/$DOC_PATH" ]]; then
+        DOC_PATH="$NSDIR/$DOC_PATH"
+    else
+        echo "Error: Documentation file not found: $DOC_PATH"
+        echo "Searched in: $NSDIR/$DOC_PATH"
+        exit 1
+    fi
+fi
+
+# Check for required tools
+if ! command -v cmark-gfm >/dev/null 2>&1; then
+    echo "Error: cmark-gfm not found. Install with:"
+    echo "  Arch/CachyOS: sudo pacman -S cmark-gfm"
+    echo "  Alpine: sudo apk add cmark"
+    echo "  Debian/Ubuntu: sudo apt install cmark-gfm"
+    exit 1
+fi
+
+if ! command -v lynx >/dev/null 2>&1; then
+    echo "Error: lynx not found. Install with:"
+    echo "  Arch/CachyOS: sudo pacman -S lynx"
+    echo "  Alpine: sudo apk add lynx"
+    echo "  Debian/Ubuntu: sudo apt install lynx"
+    exit 1
+fi
+
+# Change to document directory for proper relative link resolution
+DOC_DIR=$(dirname "$DOC_PATH")
+DOC_FILE=$(basename "$DOC_PATH")
+cd "$DOC_DIR" || exit 1
+
+# Convert markdown to HTML and display in lynx
+echo "Loading documentation: ${DOC_PATH#$NSDIR/}"
+echo "Navigation: Arrow keys to move, Enter to follow links, 'q' to quit"
+echo ""
+cmark-gfm -t html "$DOC_FILE" | lynx -stdin -localhost
+
+# Alternative: Direct markdown viewing with lynx (preserves some formatting)
+# lynx "$DOC_PATH"

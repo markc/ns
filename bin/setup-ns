@@ -1,17 +1,44 @@
 #!/usr/bin/env bash
-# Created: 20170319 - Updated: 20250407
-# Copyright (C) 1995-2025 Mark Constable <markc@renta.net> (AGPL-3.0)
-if [[ -d ~/.sh ]]; then
-    echo "Update NetServa SH scripts"
-    ~/.sh/bin/shm pull
+# Created: 20170319 - Updated: 20250125
+# Copyright (C) 1995-2025 Mark Constable <mc@netserva.org> (MIT License)
+
+# NetServa deployment installer script
+# Installs the NetServa management system from GitHub
+
+NSDIR="$HOME/.ns"
+NSREPO="https://github.com/markc/ns"
+
+if [[ -d "$NSDIR" ]]; then
+    echo "Updating NetServa scripts..."
+    cd "$NSDIR" || exit 1
+    git pull --rebase=false
+    echo "NetServa updated successfully"
 elif [[ ! -e /usr/bin/git ]]; then
-    echo "Please install the git package" && exit 1
+    echo "Error: git is not installed. Please install git first." >&2
+    exit 1
 else
-    echo "Setup NetServa SH scripts"
-    cd && git clone -q --depth 1 https://github.com/netserva/sh .sh
-    ~/.sh/bin/shm install
-    ~/.sh/bin/shm perms
-    git config --global pull.rebase false
-    echo "Type '. ~/.shrc' to initialize the system"
-    echo "and 'gethost' to view default ENV variables"
+    echo "Installing NetServa scripts..."
+    git clone -q --depth 1 "$NSREPO" "$NSDIR" || {
+        echo "Error: Failed to clone repository" >&2
+        exit 1
+    }
+    
+    # Make scripts executable
+    find "$NSDIR/bin" -type f -exec chmod +x {} \;
+    
+    # Initialize SSH manager if needed
+    if [[ -x "$NSDIR/bin/sshm" ]]; then
+        "$NSDIR/bin/sshm" init
+    fi
+    
+    # Set up shell initialization
+    if ! grep -q "source $NSDIR/lib/nsrc.sh" ~/.bashrc 2>/dev/null; then
+        echo "" >> ~/.bashrc
+        echo "# NetServa initialization" >> ~/.bashrc
+        echo "[[ -f $NSDIR/lib/nsrc.sh ]] && source $NSDIR/lib/nsrc.sh" >> ~/.bashrc
+    fi
+    
+    echo "NetServa installed successfully!"
+    echo "Run 'source ~/.bashrc' to initialize the environment"
+    echo "Then use 'ns help' to see available commands"
 fi

@@ -1,0 +1,38 @@
+# Private documentation and configuration
+doc/private/
+man/private/
+etc/private/
+mnt/*
+tmp/*
+
+# Private config files with sensitive data
+*.private
+*.private.*
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+*~
+
+# Log files
+*.log
+
+# SSH keys and configs
+*.key
+*.pem
+id_rsa*
+id_ecdsa*
+id_ed25519*
+
+# Database files
+*.db
+*.sqlite
+
+# Local environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

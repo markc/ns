@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Check if container name was provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $(basename "$0") <container-name>"
+    echo ""
+    echo "Display logs from a mounted incus container"
+    echo ""
+    echo "Requirements:"
+    echo "  - Container must be mounted with mount-container"
+    echo "  - SSH config must exist at ~/.ssh/config.d/<container-name>"
+    echo ""
+    echo "Example:"
+    echo "  $(basename "$0") webserver"
+    exit 1
+fi
+
+CONTAINER_NAME="$1"
+MOUNT_POINT="$HOME/Dev/ns/$CONTAINER_NAME"
+SSH_CONFIG="$HOME/.ssh/config.d/$CONTAINER_NAME"
+
+# Check if SSH config exists
+if [ ! -f "$SSH_CONFIG" ]; then
+    echo "ERROR: SSH config not found at $SSH_CONFIG"
+    echo ""
+    echo "Please create an SSH host configuration for '$CONTAINER_NAME' container"
+    echo "Example config file ($SSH_CONFIG):"
+    echo "  Host $CONTAINER_NAME"
+    echo "    HostName <container-ip>"
+    echo "    User root"
+    echo "    StrictHostKeyChecking no"
+    echo "    UserKnownHostsFile /dev/null"
+    exit 1
+fi
+
+# Check if container directory exists
+if [ ! -d "$MOUNT_POINT" ]; then
+    echo "ERROR: Container directory does not exist: $MOUNT_POINT"
+    echo "Please mount the container first with: ./bin/mount-container $CONTAINER_NAME"
+    exit 1
+fi
+
+if [ ! -d "$MOUNT_POINT/var/log" ]; then
+    echo "ERROR: $CONTAINER_NAME container not properly mounted or /var/log does not exist"
+    echo "Please verify the mount with: ./bin/container-status $CONTAINER_NAME"
+    exit 1
+fi
+
+echo "=== $CONTAINER_NAME Container Logs ==="
+echo "Available log files:"
+ls -la "$MOUNT_POINT/var/log/" | head -10
+
+echo ""
+echo "Recent system activity (last 20 lines):"
+echo "----------------------------------------"
+
+if [ -f "$MOUNT_POINT/var/log/syslog" ]; then
+    tail -20 "$MOUNT_POINT/var/log/syslog"
+elif [ -f "$MOUNT_POINT/var/log/messages" ]; then
+    tail -20 "$MOUNT_POINT/var/log/messages"
+else
+    echo "No system logs found"
+fi
+
+echo ""
+echo "To monitor logs in real-time:"
+echo "  tail -f ./$CONTAINER_NAME/var/log/syslog"
+echo "  ssh $CONTAINER_NAME 'journalctl -f'"

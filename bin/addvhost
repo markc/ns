@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# Created: 20170217 - Updated: 20250416
+# Copyright (C) 1995-2025 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+# Let's strip this right back to only adding the bare vhost essentials
+
+[[ -z $1 || $1 =~ -h ]] && echo "Usage: addvhost [uuser@]domain" && exit 1
+
+VHOST=$1
+_UTMP=''
+
+if [[ $1 ]]; then
+    if [[ $1 =~ "@" ]]; then
+        _UTMP=${1%@*}@ # $_UTMP @ domain
+        VHOST=${1#*@}  # userid @ $VHOST
+    fi
+else
+    VHOST=$1
+fi
+
+if [[ -f /root/.vhosts/$VHOST ]]; then
+    echo "### Exists /root/.vhosts/$VHOST"
+else
+    echo "### Create /root/.vhosts/$VHOST config file"
+    sethost $VHOST
+    gethost >/root/.vhosts/$VHOST
+    $SUDO touch /root/.vhosts/$VHOST.conf
+    $SUDO chmod 600 /root/.vhosts/*
+fi
+
+. /root/.vhosts/$VHOST
+
+V_CREATED=$(date +"%Y-%m-%d %H:%M:%S")
+V_UPDATED=$V_CREATED
+
+IS_VHOST=$(
+    cat <<EOS | $SQCMD
+ SELECT COUNT(id)
+   FROM vhosts
+  WHERE domain = '$VHOST'
+EOS
+)
+
+[[ $IS_VHOST -gt 0 ]] && echo "### ERROR: $VHOST already exists in database" && exit 6
+
+if [[ $(grepuser ":$VHOST:") ]]; then
+    echo "### Warning: $UUSER for $VHOST already exists"
+else
+    echo "### Create $UUSER user"
+    [[ $(getent group sudo) ]] || groupadd -r sudo
+    U_GRP=$([[ $U_UID = 1000 ]] && echo "-G sudo,adm")
+    #TMPIP=$([[ -n $USEIP ]] && echo ",$USEIP")
+    useradd -M -U -s $U_SHL -u $U_UID -d $UPATH -c "$VHOST$TMPIP" $U_GRP $UUSER
+    [[ -n $UPASS && $UPASS != $APASS ]] && { echo $UUSER:$UPASS | chpasswd; }
+fi
+
+echo "### Create entry in $ADMIN.vhosts ($DTYPE)"
+DO_VHOST=$(
+    cat <<EOS | $SQCMD
+ INSERT INTO vhosts (
+        active,
+        created,
+        domain,
+        gid,
+        uid,
+        uname,
+        updated
+) VALUES (
+        1,
+        '$V_CREATED',
+        '$VHOST',
+        $U_GID,
+        $U_UID,
+        '$UUSER',
+        '$V_CREATED'
+)
+EOS
+)
+
+if [[ -d $C_FPM ]]; then
+
+    if [[ $OSTYP == alpine || $OSTYP == manjaro ]]; then
+        _POOL=$C_FPM/php-fpm.d
+    else
+        _POOL=$C_FPM/pool.d
+    fi
+
+    if [ -f $_POOL/$VHOST.conf ]; then
+        echo "### $_POOL/$VHOST.conf already exists"
+    else
+        echo "### Create $_POOL/$VHOST.conf"
+        cat <<EOS >$_POOL/$VHOST.conf
+[$VHOST]
+user = $U_UID
+group = $U_GID
+include = $C_FPM/common.conf
+EOS
+        if [ -f $_POOL/www.conf ]; then
+            echo "### Rename $_POOL/www.conf $C_FPM/www.conf"
+            mv $_POOL/www.conf $C_FPM
+        fi
+    fi
+fi
+
+if [[ -d $UPATH ]]; then
+    echo "### Warning: $UPATH already exists"
+else
+    echo "### Create $UPATH"
+    mkdir -p $UPATH/{.cache,.ssh,.nano,.wp-cli,bin,etc,home/u,var/log,var/run,var/tmp,var/www/html}
+fi
+
+if [[ -f $UPATH/.ssh/authorized_keys ]]; then
+    echo "### $UPATH/.ssh/authorized_keys already exists"
+else
+    if [[ -f /root/.ssh/id_rsa.pub ]]; then
+        echo "### Setup $UPATH/.ssh/authorized_keys with /root/.ssh/id_rsa.pub"
+        cp /root/.ssh/id_rsa.pub $UPATH/.ssh/authorized_keys
+    elif [[ -f /root/.ssh/authorized_keys ]]; then
+        echo "### Setup $UPATH/.ssh/authorized_keys with /root/.ssh/authorized_keys"
+        cp /root/.ssh/authorized_keys $UPATH/.ssh/authorized_keys
+    else
+        echo "### Warning: no /root/.ssh/authorized_keys or /root/.ssh/id_rsa.pub"
+    fi
+    [[ ! -f $UPATH/.hushlogin ]] && touch $UPATH/.hushlogin
+fi
+
+if [[ -L $UPATH/home/u/$VHOST ]]; then
+    echo "### $UPATH/home/u/$VHOST already exists"
+else
+    echo "### Create custom chroot symlink"
+    cd $UPATH/home/u
+    ln -s ../.. $VHOST
+fi
+
+if [[ -f $UPATH/bin/busybox ]]; then
+    echo "### $UPATH/bin/busybox already exists"
+elif [[ ! -e /bin/busybox ]]; then
+    echo "### /bin/busybox does not exist"
+else
+    echo "### Setup busybox with sh, hostname, tail symlinks"
+    cp /bin/busybox $UPATH/bin
+    cd $UPATH/bin
+    ln -s busybox sh
+    ln -s busybox hostname
+    ln -s busybox tail
+fi
+
+if [[ -f $UPATH/.profile ]]; then
+    echo "### $UPATH/.profile already exists"
+else
+    echo "### Create $UPATH/.profile"
+    cat <<EOS >$UPATH/.profile
+export PS1="\[\033[1;35m\]\$LOGNAME@$HOSTNAME \w\[\033[0m\] "
+alias la='ls -lA -F --color'
+alias ll='ls -l -F --color'
+alias ls='ls -F --color'
+alias e='nano -t -x -c'
+alias plog='tail -f ~/var/log/php-errors.log'
+EOS
+fi
+
+if [[ -f $UPATH/etc/passwd ]]; then
+    echo "### $UPATH/etc/passwd already exists"
+else
+    echo "### Create $UPATH/etc/passwd"
+    W_UID=$(id -u $WUGID)
+    W_GID=$(id -g $WUGID)
+    cat <<EOS >$UPATH/etc/passwd
+root:x:0:0:::
+$WUGID:x:$W_UID:$W_GID:::
+$UUSER:x:$U_UID:$U_GID:::
+EOS
+fi
+
+if [[ -f $UPATH/etc/group ]]; then
+    echo "### $UPATH/etc/group already exists"
+else
+    echo "### Create $UPATH/etc/group"
+    W_GID=$(id -g $WUGID)
+    cat <<EOS >$UPATH/etc/group
+root:x:0:
+$WUGID:x:$W_GID:
+$UUSER:x:$U_GID:
+EOS
+fi
+
+if [[ -f $WPATH/index.html || -f $WPATH/index.php ]]; then
+    [[ -f $WPATH/index.html ]] && echo "### $WPATH/index.html already exists"
+    [[ -f $WPATH/index.php ]] && echo "### $WPATH/index.php already exists"
+else
+    echo "### Create $WPATH/index.html"
+    echo "<!DOCTYPE html><title>$VHOST</title><h1 style=\"text-align:center\">$VHOST</h1>" >$WPATH/index.html
+fi
+
+if [[ -f $WPATH/phpinfo.php ]]; then
+    echo "### $WPATH/phpinfo.php already exists"
+else
+    echo "### Create $WPATH/phpinfo.php"
+    echo "<?php error_log(__FILE__.' '.\$_SERVER['REMOTE_ADDR']); phpinfo();" >$WPATH/phpinfo.php
+fi
+
+echo "Optional: newssl $VHOST mail www [IP]"
+echo "Optional: addvmail $VUSER@$VHOST"
+echo "Optional: addwp $VHOST"
+
+logging $VHOST update >/dev/null
+chshpw $UUSER $UPASS
+chperms $VHOST
+serva restart web
+
+
+# This might still be needed
+#
+#    echo "### Note: if this server has outside net access with DNS"
+#    echo "###       pointing a public IP to it's FQDN then use"
+#    echo "###           newssl $VHOST mail www [IP]"
+#    echo "###       to provide a real LetsEncrypt SSL certificate."
+#
+#    if [[ ! -d $C_SSL/$VHOST ]]; then
+#        # Temporary self-signed SSL certificate defaults
+#        C="AU"
+#        ST="QLD"
+#        L="GoldCoast"
+#        O="NetServa"
+#        OU="IT Department"
+#
+#        echo "### Create temporary self-signed certificate for $VHOST"
+#        [[ ! -d $C_SSL/$VHOST ]] && mkdir $C_SSL/$VHOST
+#        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+#            -subj "/C=$C/ST=$ST/L=$L/O=$O/OU=$OU/CN=$VHOST" \
+#            -keyout /etc/ssl/$VHOST/privkey.pem \
+#            -out /etc/ssl/$VHOST/fullchain.pem >/dev/null 2>&1
+#    fi

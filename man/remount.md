@@ -6,13 +6,13 @@ ns remount [OPTIONS] <system-name> [mount-options...]
 ```
 
 ## Description
-Unmount and remount a system (useful for refreshing connections).
+Unmount and remount a system to refresh the connection.
 
-This command is particularly useful when SSH connections have timed out or when you need to refresh mount options.
+This command is particularly useful when SSH connections have timed out, when network issues have occurred, or when you need to mount a different path on the same system.
 
 ## Arguments
 - `system-name` - Name of system to remount (required)
-- `mount-options` - Any additional options supported by mount command
+- `mount-options` - Any additional options supported by the mount command
 
 ## Examples
 
@@ -24,34 +24,43 @@ ns remount mgo
 # Remount with different path
 ns remount mko /var/www
 
-# Remount remote system
+# Remount system after network interruption
 ns remount webserver
 ```
 
 ### Advanced Usage
 ```bash
-# Remount with specific SSH options
-ns remount -o reconnect,idmap=user myserver
+# Remount with custom mount point
+ns remount -p /mnt/custom mko
 
-# Remount container with different user mapping
-ns remount container-name /home/user
+# Remount different directory
+ns remount mko /var/log
+
+# Get help
+ns remount --help
 ```
 
 ## Use Cases
 
-- **Connection timeouts**: Refresh stale SSH connections
-- **Network issues**: Re-establish after network interruption
-- **Permission changes**: Update user mappings or access rights
+- **Connection timeouts**: Refresh stale SSH/SSHFS connections
+- **Network issues**: Re-establish mount after network interruption
 - **Path changes**: Mount different directory on same system
+- **Cache refresh**: Clear and refresh cached files
+- **Permission updates**: Apply new SSH key or permission changes
 
-## Process
-1. Safely unmounts the existing mount
-2. Re-establishes connection using saved configuration
-3. Mounts with original or updated options
-4. Verifies mount is successful
+## How It Works
+1. Unmounts the existing mount (if any)
+2. Waits 2 seconds for cleanup
+3. Mounts again with the same or new options
+4. All original mount options are preserved unless overridden
+
+## Notes
+- The remount preserves all original mount options
+- You can specify new options which will be passed to mount
+- If unmount fails, the command continues with mount attempt
+- Useful for recovering from "Transport endpoint is not connected" errors
 
 ## Related Commands
 - `ns mount <system>` - Initial mount operation
 - `ns unmount <system>` - Unmount without remounting
 - `ns mounts` - List all mounted systems
-- `ns ssh list` - Check SSH configurations

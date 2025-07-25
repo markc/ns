@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# Created: 20170524 - Updated: 20250410
+# Copyright (C) 1995-2025 Mark Constable <mc@netserva.org> (MIT License)
+
+[[ $1 =~ '-h' ]] && echo "Usage: setup-host [fqdn] [(mysql)|sqlite]" && exit 1
+
+# Detect OS type
+if [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    case "$ID" in
+        alpine) export OSTYP=alpine ;;
+        debian) export OSTYP=debian ;;
+        ubuntu) export OSTYP=ubuntu ;;
+        manjaro|cachyos) export OSTYP=manjaro ;;
+        *) export OSTYP=unknown ;;
+    esac
+fi
+
+# Source NetServa functions
+[[ -f ~/.ns/lib/functions.sh ]] && source ~/.ns/lib/functions.sh || { echo "Error: Cannot find ~/.ns/lib/functions.sh"; exit 1; }
+[[ -f ~/.ns/lib/setup_core.sh ]] && source ~/.ns/lib/setup_core.sh || { echo "Error: Cannot find ~/.ns/lib/setup_core.sh"; exit 1; }
+
+VHOST=${1:-$VHOST}
+DTYPE=${2:-$DTYPE}
+LXDBR=${3:-''}
+_VIRT=""
+
+[[ -e /usr/bin/systemd-detect-virt ]] && _VIRT=$(systemd-detect-virt)
+
+if [[ $OSTYP == alpine ]]; then
+
+    echo "### Install Alpine base packages"
+
+    OSMIR=nl.alpinelinux.org
+    OSREL=edge
+    V_PHP=84
+
+    # Missing OpenDMARC and SpamProbe
+    ALIST="bash bc bind-tools bogofilter busybox-static bridge-utils
+ca-certificates curl db dovecot dovecot-lmtpd dovecot-pigeonhole-plugin
+dovecot-sqlite ebtables fcgiwrap gawk git iputils jq msmtp msmtp mtr nano nginx
+opendkim opendkim-utils pdns pdns-backend-sqlite3 php$V_PHP php$V_PHP-curl
+php$V_PHP-fpm php$V_PHP-gd php$V_PHP-imap php$V_PHP-opcache php$V_PHP-pdo
+php$V_PHP-pdo_sqlite php$V_PHP-pecl-redis php$V_PHP-phar php$V_PHP-posix
+php$V_PHP-session php$V_PHP-simplexml php$V_PHP-zip postfix postfix-pcre
+postfix-policyd-spf-perl postfix-sqlite procps redis rsync s-nail shadow sqlite
+sudo wget which whois"
+
+    MLIST="dovecot-mysql mariadb mariadb-client pdns-backend-mariadb
+php$V_PHP-pdo_mysql postfix-mysql"
+
+    if [[ -f /etc/apk/repositories.orig ]]; then
+        echo "### Exists /etc/apk/repositories.orig"
+    else
+        echo "### Update /etc/apk/repositories with $OSREL"
+        mv /etc/apk/repositories /etc/apk/repositories.orig
+        cat <<EOS >/etc/apk/repositories
+https://$OSMIR/alpine/$OSREL/main
+https://$OSMIR/alpine/$OSREL/community
+EOS
+        apk update && apk upgrade
+        apk add $ALIST
+
+        if [[ $DTYPE == mysql ]]; then
+            echo "### Install mariabdb packages"
+            apk add $MLIST
+            /etc/init.d/mariadb setup
+            rc-service mariadb start
+        fi
+    fi
+    echo "### Create symlink to /usr/bin/php"
+    cd /usr/bin && ln -s php$V_PHP php
+
+elif [[ $OSTYP == manjaro || $OSTYP == cachyos ]]; then
+
+    # Patch for Manjaro adding this system group as a user group (bad!)
+    grep -q '^autologin:x:1000' /etc/group
+    if [[ $? -eq 0 ]]; then
+        groupmod -g 100 autologin
+    fi
+
+    if [[ -f /etc/pacman.d/mirrorlist.orig ]]; then
+        echo "### Exists /etc/pacman.d/mirrorlist.orig"
+    else
+        echo "### Install Arch/Manjaro base packages"
+
+        # Default List of required core Netserva Arch/Manjaro packages
+        DLIST="bash bc bridge-utils dovecot inetutils s-nail busybox ca-certificates
+curl db dovecot ebtables fcgiwrap gawk git iputils jq libxml2 mailgraph msmtp
+mtr mutt nano net-tools nginx-mainline opendkim opendmarc pflogsumm php php-fpm
+php-gd php-imap php-intl php-sqlite php-imagick php-redis perl-mail-spf
+pigeonhole postfix postfix-lmdb postfix-pcre postfix-sqlite powerdns pwgen redis
+rsync sqlite sudo time minizip wget which whois yay"
+
+        # ? php-imap php-intl
+
+        # Optional Mariadb List of packages
+        MLIST="mariadb mariadb-clients postfix-mysql"
+
+        mv /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.orig
+        echo "### Normalize mirrorlist, use 'pacman-mirrors --geoip --api -B stable' to update"
+        echo "Server = http://$OSMIR/$OSREL/\$repo/\$arch" >/etc/pacman.d/mirrorlist
+
+        pacman -Syu >/dev/null 2>&1
+        yes | pacman -S iptables-nft >/dev/null 2>&1
+        pacman -S $DLIST --needed --noconfirm >/dev/null 2>&1
+
+        if [[ $DTYPE == mysql ]]; then
+            pacman -S $MLIST --needed --noconfirm >/dev/null 2>&1
+            mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql >/dev/null 2>&1
+            systemctl start mariadb
+        fi
+    fi
+
+elif [[ $OSTYP == ubuntu || $OSTYP == debian ]]; then
+
+    echo "### Install Debian/Ubuntu base packages"
+
+    if [[ $OSTYP == debian ]]; then
+        OSMIR=${OSMIR:-'ftp.au.debian.org'}
+        OSREL=${OSREL:-'bookworm'}
+    fi
+
+    # Default List of required core Netserva Debian packages
+    DLIST="apache2-utils apt-utils bash bc bind9-host bridge-utils bsd-mailx
+busybox-static ca-certificates curl db5.3-util deborphan dnsutils dovecot-imapd
+dovecot-lmtpd dovecot-managesieved dovecot-sqlite ebtables fcgiwrap gawk git
+gnupg nftables iputils-ping jq libxml2-utils mailgraph msmtp mtr-tiny mutt nano
+net-tools nginx opendkim opendkim-tools opendmarc openssh-server
+pdns-backend-sqlite3 pflogsumm php$V_PHP php$V_PHP-bcmath php$V_PHP-curl
+php$V_PHP-fpm php$V_PHP-gd php$V_PHP-gmp php$V_PHP-imap php$V_PHP-intl
+php$V_PHP-mbstring php$V_PHP-soap php$V_PHP-sqlite3 php$V_PHP-xml php$V_PHP-zip
+php-imagick php-redis postfix postfix-lmdb postfix-policyd-spf-perl
+postfix-sqlite pwgen redis-server rsyslog rsync sqlite3 sudo time unzip wget
+whois"
+
+    # Mysql List of packages (not need if using SQLite)
+    MLIST="dovecot-mysql mariadb-common mariadb-client mariadb-server
+pdns-backend-mysql php$V_PHP-mysql postfix-mysql"
+
+    # Make sure that IP4 is the default
+    grep -q '^#precedence ::ffff:0:0/96  100' /etc/gai.conf
+    if [[ $? -eq 0 ]]; then
+        echo "### Warning: giving preference to IPv4 (IPv6 is Ubuntu default)"
+        sed -i 's;#precedence ::ffff:0:0/96  100;precedence ::ffff:0:0/96  100;' /etc/gai.conf
+    fi
+
+    if [[ -f /etc/apt/apt.conf.d/20local ]]; then
+        echo "### Exists /etc/apt/apt.conf.d/20local"
+    else
+        echo "### Create /etc/apt/apt.conf.d/20local"
+        cp ~/.ns/etc/_etc_apt_apt.conf.d_20local /etc/apt/apt.conf.d/20local
+    fi
+
+    if [[ -f /etc/apt/sources.list.orig ]]; then
+        echo "### Exists /etc/apt/sources.list.orig"
+    else
+        export DEBIAN_FRONTEND=noninteractive
+        export TERM=linux
+
+        # If Proxmox then leave /etc/apt/sources.list alone
+        if [[ ! -d /etc/pve ]]; then
+            echo "### Setup apt sources list for $OSREL"
+            mv /etc/apt/sources.list /etc/apt/sources.list.orig
+            if [[ $OSTYP == debian ]]; then
+                cat <<EOS >/etc/apt/sources.list
+deb http://$OSMIR/debian $OSREL main
+deb http://$OSMIR/debian $OSREL-updates main
+deb http://security.debian.org/debian-security $OSREL-security main
+EOS
+            else
+                sed ~/.ns/etc/_etc_apt_sources.list \
+                    -e "s/_OSMIR/$OSMIR/" -e "s/_OSREL/$OSREL/" >/etc/apt/sources.list
+            fi
+        fi
+
+        cat <<EOS | debconf-set-selections
+postfix postfix/destinations string 'localhost'
+postfix postfix/mailname string 'localhost'
+postfix postfix/main_mailer_type string 'Internet Site'
+EOS
+
+        echo "### Update package list for $OSREL, patience please..."
+        apt-get -yqq update >/dev/null
+
+        echo "### Upgrade packages for $OSREL, more patience..."
+        apt-get -yqq -u dist-upgrade >/dev/null
+
+        echo "### Install default package set, yet more patience..."
+        apt-get -yqq install $DLIST >/dev/null
+
+        if [[ $DTYPE == mysql ]]; then
+            echo "### Install MYSQL package set, even more patience..."
+            apt-get -yqq install $MLIST >/dev/null
+
+            echo "### Change Mysql to utf8 otherwise pdns tables will not install"
+            sed -i /etc/mysql/mariadb.conf.d/50-server.cnf \
+                -e "/^character-set-server/ s/utf8mb4/utf8/" \
+                -e "/^collation-server/ s/utf8mb4_general_ci/utf8_general_ci/"
+        fi
+
+        echo "### Disable pdns until actually needed"
+        systemctl stop pdns >/dev/null 2>&1
+        systemctl disable pdns >/dev/null 2>&1
+    fi
+
+    # Ubuntu uses netplan, Debian uses ifupdown, Proxmox uses ifupdown2 (python)
+    # systemctl enable systemd-networkd
+    [[ $_VIRT != lxc ]] && systemctl enable systemd-resolved
+
+    # TODO: deprecated, find a better all round logging system
+    systemctl enable mailgraph >/dev/null 2>&1
+fi
+
+[[ ! -d $VPATH ]] && echo "### Create $VPATH" && mkdir -p $VPATH
+
+if [[ -f /etc/ssh/sshd_config.orig ]]; then
+    echo "### Exists /etc/ssh/sshd_config.orig"
+else
+    echo "### Create /etc/ssh/sshd_config"
+    mv /etc/ssh/sshd_config /etc/ssh/sshd_config.orig
+    cp ~/.ns/etc/_etc_ssh_sshd__config /etc/ssh/sshd_config
+
+    if [[ $OSTYP == ubuntu ]]; then
+        # The easy way to revert the Ubuntu 22.10+ socket activation disaster
+        systemctl disable --now ssh.socket
+        systemctl enable --now ssh.service
+    else
+        sc restart sshd
+    fi
+fi
+
+[[ ! -f ~/.ssh/config ]] && sshm i
+
+# If we are NOT on a systemd system (ie; Alpine)
+if [[ $OSTYP == alpine ]]; then
+    if [[ ! -f /etc/resolv.conf.orig ]]; then
+        mv /etc/resolv.conf /etc/resolv.conf.orig
+        echo "### Change /etc/resolv.conf to 1.1.1.1 (static)"
+        cat <<EOS | tee /etc/resolv.conf >/dev/null
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOS
+    fi
+fi
+
+if [[ -f /etc/sysctl.d/50-nginx-tweaks.conf ]]; then
+    echo "### Exists /etc/sysctl.d/50-nginx-tweaks.conf"
+elif [[ ! -d /etc/sysctl.d ]]; then
+    echo "### /etc/sysctl.d does not exist"
+else
+    echo "### Create /etc/sysctl.d/50-nginx-tweaks.conf"
+    cat <<EOS >/etc/sysctl.d/50-nginx-tweaks.conf
+# Auto created by NetServa HCP/SH on $(date +%Y%m%d)
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_notsent_lowat = 16384
+vm.swappiness = 1
+net.core.somaxconn = 512
+EOS
+    sysctl -p >/dev/null
+fi
+

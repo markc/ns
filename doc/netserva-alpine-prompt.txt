@@ -1,0 +1,7 @@
+I want to create a new NetServa based local Incus lxc container running Alpine Edge (like the haproxy server) and install postfix,  │
+│   dovecot, sqlite, nginx, php-fpm as the mail.netserva.org primary host with a website at netserva.org, netserva.com and              │
+│   netserva.net using the bin/setup-* scripts located in bin/ (feel free to adjust but follow the basic pattern and DB schema) in      │
+│   this order, setup-host, setup-db sqlite, setup-etc, setup-fqdn mail.netserva.org, then setup-hcp mail.netserva.org. Use             │
+│   bin/addvmail admin@netserva.org and bin/addvhost to add netserva.com and netserva.net. Use sqlite as a super lightweight database   │
+│   for all the services and document all the steps in doc/netserva-alipne.md. You can use the trixie debian LXC container as a         │
+│   NetServa guide and example (but it uses Mariadb instead of SQLite). 

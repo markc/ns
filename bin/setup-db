@@ -1,0 +1,436 @@
+#!/usr/bin/env bash
+# Created: 20170319 - Updated: 20250416
+# Copyright (C) 1995-2025 Mark Constable <markc@renta.net> (AGPL-3.0)
+
+[[ $1 =~ '-h' ]] &&
+    echo "Usage: setup-db [remove|(mysql)|sqlite] [sqlite path]" && exit 1
+
+_arg1=${1:-'mysql'}
+
+if [[ $_arg1 != remove ]]; then
+    DTYPE=$_arg1
+fi
+
+if [[ -n $2 ]]; then
+    DBSQL=$2
+    DPATH=$DBSQL/sysadm/sysadm.db
+fi
+
+if [[ $_arg1 == remove ]]; then
+
+    if [[ $(command -v systemctl) ]]; then # Check if systemd is available
+        echo "### Stopping MariaDB service (systemd)..."
+        sudo systemctl stop mariadb.service
+    elif [[ $(command -v rc-service) ]]; then # Check if OpenRC is available
+        echo "### Stopping MariaDB service (OpenRC)..."
+        sudo rc-service mariadb stop
+    else
+        echo "### ERROR: Neither systemd nor OpenRC found. Cannot stop MariaDB service"
+        exit 1
+    fi
+
+    echo "### Removing MariaDB data directory and configuration..."
+    if [[ $DTYPE == mysql ]]; then
+        # Stop MariaDB service
+        if rc-service mariadb status | grep -q "started"; then
+            echo "### Stopping MariaDB service..."
+            sudo rc-service mariadb stop
+        fi
+
+        # Remove data directory (with confirmation)
+        echo "### Removing data directory: $DBMYS"
+        sudo rm -rf "$DBMYS"/*
+
+        # Remove .my.cnf file (if it exists)
+        if [[ -f ~/.my.cnf ]]; then
+            echo "### Removing .my.cnf file"
+            rm ~/.my.cnf
+        fi
+        echo "### MariaDB data directory and configuration removed"
+
+    elif [[ $DTYPE == sqlite ]]; then
+        if [[ -d $DBSQL ]]; then
+            rm -rf $DBSQL
+        else
+            echo "### Warning: $DBSQL does not exist"
+        fi
+         echo "### SQLite data directory removed"
+   else 
+        echo "Unknown database type"
+    fi
+    exit 0  # Exit script after removal
+fi
+
+if [[ $DTYPE == sqlite ]]; then
+
+    if [[ -d $DBSQL ]]; then
+        echo "### Exists $DBSQL"
+    else
+        echo "### Create $DBSQL"
+        mkdir -p $DBSQL/{dovecot,postfix,$ADMIN}
+        if [[ $(id -u) -eq 0 ]]; then
+            chown dovecot:dovecot $DBSQL/dovecot
+            chown postfix:postfix $DBSQL/postfix
+            chown $A_UID:$A_GID -R $DBSQL/$ADMIN
+        fi
+        chmod 700 $DBSQL/*
+    fi
+
+    SQLPK="INTEGER PRIMARY KEY AUTOINCREMENT"
+    # are these next two really necessary?
+    SQCMD="sqlite3 $DPATH"
+    SQDNS="sqlite3 $DBSQL/$ADMIN/pdns.db"
+
+elif [[ $DTYPE == mysql ]]; then
+
+    if [[ $OSTYP == alpine* ]]; then
+        echo "### Detected Alpine Linux"
+        if [[ ! -e /var/lib/mysql/ibdata1 ]]; then # Choose an essential file
+            echo "### MariaDB data directory is not initialized. Initializing..."
+
+            if rc-service mariadb status | grep -q "started"; then
+                echo "### Stopping MariaDB service..."
+                sudo rc-service mariadb stop
+            fi
+
+            echo "### Setting up the MySQL database..."
+            sudo /etc/init.d/mariadb setup >/dev/null 2>&1
+
+            if [[ $? -ne 0 ]]; then
+                echo "### ERROR: Failed to initialize data directory."
+                exit 1
+            fi
+
+            echo "### Starting MariaDB service..."
+            sudo rc-service mariadb start
+            if [[ $? -ne 0 ]]; then
+                echo "### ERROR: Failed to start MariaDB service."
+                exit 1
+            fi
+        else
+            echo "### MariaDB data directory already initialized."
+        fi
+    fi
+
+    if [[ -f ~/.my.cnf ]]; then
+        echo "### Exists ~/.my.cnf (MySQL)"
+    else
+        echo "### Create ~/.my.cnf"
+        cat <<EOS | tee ~/.my.cnf >/dev/null
+# Autocreated by setup-db
+[client]
+host = $DHOST
+port = $DPORT
+user = root
+password = $DPASS
+EOS
+        chmod 600 ~/.my.cnf
+    fi
+
+    if [[ -d $DBMYS/$ADMIN ]]; then
+        echo "### Exists $DBMYS/$ADMIN"
+    else
+        echo "### Create MySQL privileges"
+        cat <<EOS | mariadb
+CREATE DATABASE IF NOT EXISTS $ADMIN;
+CREATE DATABASE IF NOT EXISTS pdns;
+GRANT ALL ON $ADMIN . * TO '$DUSER'@'localhost' IDENTIFIED BY '$DPASS';
+GRANT ALL ON pdns . * TO '$DUSER'@'localhost' IDENTIFIED BY '$DPASS';
+FLUSH PRIVILEGES;
+EOS
+    fi
+    SQLPK="int(11) PRIMARY KEY AUTO_INCREMENT"
+    # are these next two really necessary?
+    SQCMD="mariadb -BN $ADMIN"
+    SQDNS="mariadb -BN pdns"
+
+else
+    echo "### ERROR: unknown argument '$_arg1'" && exit 2
+fi
+
+### FIXME: do not re-run SQL queries, check they exist first
+
+cat <<EOS | $SQCMD
+CREATE TABLE IF NOT EXISTS accounts (
+  id $SQLPK,
+  grp int(11) NOT NULL DEFAULT '0',
+  acl int(11) NOT NULL DEFAULT '0',
+  vhosts int(11) NOT NULL DEFAULT '1',
+  login varchar(63) NOT NULL,
+  fname varchar(63) NOT NULL DEFAULT '',
+  lname varchar(63) NOT NULL DEFAULT '',
+  altemail varchar(63) NOT NULL DEFAULT '',
+  otp varchar(15)  NOT NULL DEFAULT '',
+  otpttl int(11) NOT NULL DEFAULT '0',
+  cookie varchar(63) NOT NULL DEFAULT '',
+  webpw varchar(127) NOT NULL DEFAULT '',
+  updated datetime NOT NULL DEFAULT '2018-01-01 00:00:01',
+  created datetime NOT NULL DEFAULT '2018-01-01 00:00:01'
+);
+
+CREATE TABLE IF NOT EXISTS cookies (
+  id $SQLPK,
+  accounts_id int(11) DEFAULT NULL,
+  token varchar(255) DEFAULT NULL,
+  expire timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vhost_log (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  hid int(11) NOT NULL DEFAULT '1',
+  ymd date NOT NULL DEFAULT '2018-01-01',
+  size_mpath bigint(20) NOT NULL DEFAULT '0',
+  size_wpath bigint(20) NOT NULL DEFAULT '0',
+  size_upath bigint(20) NOT NULL DEFAULT '0'
+);
+CREATE TABLE IF NOT EXISTS vhost_log_bkp (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  hid int(11) NOT NULL DEFAULT '1',
+  ymd date NOT NULL DEFAULT '2018-01-01',
+  size_mpath bigint(20) NOT NULL DEFAULT '0',
+  size_wpath bigint(20) NOT NULL DEFAULT '0',
+  size_upath bigint(20) NOT NULL DEFAULT '0'
+);
+
+CREATE TABLE IF NOT EXISTS vmail_log (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  mid int(11) NOT NULL DEFAULT '1',
+  ymd date NOT NULL DEFAULT '2018-01-01',
+  size_mail bigint(20) NOT NULL DEFAULT '0',
+  size_spam bigint(20) NOT NULL DEFAULT '0',
+  size_home bigint(20) NOT NULL DEFAULT '0',
+  num_inbox int(11) NOT NULL DEFAULT '0',
+  num_spam int(11) NOT NULL DEFAULT '0',
+  num_total int(11) NOT NULL DEFAULT '0'
+);
+CREATE TABLE IF NOT EXISTS vmail_log_bkp (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  mid int(11) NOT NULL DEFAULT '1',
+  ymd date NOT NULL DEFAULT '2018-01-01',
+  size_mail bigint(20) NOT NULL DEFAULT '0',
+  size_spam bigint(20) NOT NULL DEFAULT '0',
+  size_home bigint(20) NOT NULL DEFAULT '0',
+  num_inbox int(11) NOT NULL DEFAULT '0',
+  num_spam int(11) NOT NULL DEFAULT '0',
+  num_total int(11) NOT NULL DEFAULT '0'
+);
+CREATE TABLE IF NOT EXISTS valias (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  hid int(11) NOT NULL DEFAULT '1',
+  active tinyint(1) NOT NULL DEFAULT '1',
+  source varchar(63) NOT NULL,
+  target varchar(255) NOT NULL,
+  updated datetime NOT NULL DEFAULT '2018-01-01 00:00:01',
+  created datetime NOT NULL DEFAULT '2018-01-01 00:00:01'
+);
+CREATE TABLE IF NOT EXISTS vhosts (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  domain varchar(63) NOT NULL,
+  uname varchar(63) NOT NULL DEFAULT 'sysadm',
+  uid int(11) NOT NULL DEFAULT '1000',
+  gid int(11) NOT NULL DEFAULT '1000',
+  active tinyint(1) NOT NULL DEFAULT '1',
+  updated datetime NOT NULL DEFAULT '2018-01-01 00:00:01',
+  created datetime NOT NULL DEFAULT '2018-01-01 00:00:01'
+);
+CREATE TABLE IF NOT EXISTS vmails (
+  id $SQLPK,
+  aid int(11) NOT NULL DEFAULT '1',
+  hid int(11) NOT NULL DEFAULT '1',
+  gid int(11) NOT NULL DEFAULT '1000',
+  uid int(11) NOT NULL DEFAULT '1000',
+  active tinyint(1) NOT NULL DEFAULT '1',
+  quota bigint(20) NOT NULL DEFAULT '500000000',
+  user varchar(63) NOT NULL DEFAULT '',
+  home varchar(127) NOT NULL DEFAULT '',
+  password varchar(127) NOT NULL DEFAULT '',
+  proxy tinyint(1) NOT NULL DEFAULT '0',
+  updated datetime NOT NULL DEFAULT '2018-01-01 00:00:01',
+  created datetime NOT NULL DEFAULT '2018-01-01 00:00:01'
+);
+
+
+CREATE VIEW IF NOT EXISTS valias_view AS
+ SELECT va.id,
+        va.source,
+        va.target,
+        va.active,
+        va.updated,
+        vh.domain
+   FROM valias va
+        JOIN vhosts vh ON vh.id = va.hid;
+
+CREATE VIEW IF NOT EXISTS vmails_view AS
+ SELECT vm.id,
+        vm.user,
+        vm.quota,
+        vm.active,
+        vm.proxy,
+        vm.updated,
+        vh.domain,
+        ml.size_mail,
+        ml.num_total
+   FROM vmails vm
+        JOIN vhosts vh ON vh.id = vm.hid
+            LEFT JOIN vmail_log ml ON vm.id = ml.mid;
+
+CREATE VIEW IF NOT EXISTS vhosts_view AS
+ SELECT vh.id,
+        vh.domain,
+        vh.active,
+        vh.updated,
+        hl.size_mpath,
+        hl.size_upath,
+        count(distinct vm.id) num_mailboxes,
+        count(distinct va.id) num_aliases
+   FROM vhosts vh
+        LEFT JOIN vhost_log hl ON vh.id = hl.hid
+            LEFT JOIN vmails vm ON vh.id = vm.hid
+                LEFT JOIN valias va ON vh.id = va.hid
+  GROUP BY vh.id, hl.size_mpath, hl.size_upath;
+
+EOS
+
+cat <<EOS | $SQDNS
+CREATE TABLE IF NOT EXISTS comments (
+  id $SQLPK,
+  domain_id int(11) NOT NULL,
+  name varchar(255) NOT NULL,
+  type varchar(15) NOT NULL,
+  modified_at int(11) NOT NULL,
+  account varchar(40) DEFAULT NULL,
+  comment text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cryptokeys (
+  id $SQLPK,
+  domain_id int NOT NULL,
+  flags int(11) NOT NULL,
+  active bool,
+  published bool DEFAULT 1,
+  content text
+);
+CREATE TABLE IF NOT EXISTS domainmetadata (
+  id $SQLPK,
+  domain_id int(11) NOT NULL,
+  kind varchar(31),
+  content text
+);
+CREATE TABLE IF NOT EXISTS domains (
+  id $SQLPK,
+  name varchar(63) NOT NULL DEFAULT '',
+  master varchar(63) NULL,
+  last_check int(11) NULL,
+  type varchar(63) NOT NULL DEFAULT 'master',
+  notified_serial int(11) NULL,
+  account varchar(63) NULL,
+  updated datetime NOT NULL DEFAULT '2018-01-01 00:00:01',
+  created datetime NOT NULL DEFAULT '2018-01-01 00:00:01'
+);
+CREATE TABLE IF NOT EXISTS supermasters (
+  id $SQLPK,
+  ip varchar(63) NOT NULL,
+  nameserver varchar(255) NOT NULL,
+  account varchar(63) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tsigkeys (
+  id $SQLPK,
+  name varchar(255),
+  algorithm varchar(63),
+  secret varchar(255)
+);
+CREATE TABLE IF NOT EXISTS records (
+  id $SQLPK,
+  domain_id int(11) NULL,
+  name varchar(63) NULL,
+  type varchar(63) NULL,
+  content text NULL,
+  ttl int(11) NULL,
+  prio int(11) NULL,
+  change_date int(11) NULL,
+  disabled int(11) NULL DEFAULT '0',
+  ordername varchar(63) NULL,
+  auth int(11) NULL DEFAULT '1',
+  updated datetime NULL DEFAULT '2018-01-01 00:00:01',
+  created datetime NULL DEFAULT '2018-01-01 00:00:01'
+);
+
+CREATE VIEW IF NOT EXISTS records_view AS
+ SELECT r.id id,
+        r.domain_id AS did,
+        r.name, r.type,
+        r.content,
+        r.ttl,
+        r.prio,
+        r.disabled AS active,
+        r.updated,
+        d.name AS domain
+   FROM (records r JOIN domains d)
+  WHERE ((d.id = r.domain_id) AND (r.type <> 'SOA'));
+
+CREATE VIEW IF NOT EXISTS domains_view1 AS
+ SELECT D.id,D.name,D.type,D.updated,count(R.domain_id) AS records
+   FROM domains D
+   LEFT OUTER JOIN records R ON D.id = R.domain_id
+          GROUP BY D.id, D.name, D.type, D.updated
+         HAVING (D.name LIKE '' OR 1)
+            AND (D.type='' OR 1);
+
+CREATE VIEW IF NOT EXISTS domains_view2 AS
+ SELECT *, (SELECT DISTINCT content as soa
+              FROM records
+             WHERE type = 'SOA' AND domain_id = T.id) AS soa
+   FROM domains_view1 T;
+EOS
+
+if [[ $DTYPE == sqlite && ! -L $DPATH/dovecot ]]; then
+    echo "### Add 'PRAGMA journal_mode=DELETE' to prevent -wal and -shm files"
+    echo "### PRAGMA journal_mode=DELETE" | $SQCMD
+    echo "### Create hardlinks for dovecot/postfix"
+    cd $DBSQL
+    if [[ $(id -u) -eq 0 ]]; then
+        chown $A_UID:$A_GID -R $ADMIN
+        chmod 644 $DPATH
+    fi
+    ln $ADMIN/$(basename $DPATH) dovecot
+    ln $ADMIN/$(basename $DPATH) postfix
+    cd -
+fi
+
+# Put create indexes last because when rerun it will fail
+cat <<EOS | $SQDNS
+CREATE UNIQUE INDEX name_index ON domains (name);
+CREATE INDEX rec_name_index ON records (name);
+CREATE INDEX nametype_index ON records (name,type);
+CREATE INDEX domain_id ON records (domain_id);
+CREATE INDEX orderindex ON records (ordername);
+CREATE UNIQUE INDEX ip_nameserver_pk ON supermasters (ip, nameserver);
+CREATE INDEX comments_domain_id_index ON comments (domain_id);
+CREATE INDEX comments_nametype_index ON comments (name, type);
+CREATE INDEX comments_order_idx ON comments (domain_id, modified_at);
+CREATE INDEX domainmetaidindex ON domainmetadata (domain_id);
+CREATE INDEX domainidindex ON cryptokeys (domain_id);
+CREATE UNIQUE INDEX namealgoindex ON tsigkeys (name, algorithm);
+EOS
+
+cat <<EOS | $SQCMD
+CREATE INDEX accounts_grp ON accounts (grp);
+CREATE INDEX accounts_acl ON accounts (acl);
+CREATE UNIQUE INDEX accounts_login ON accounts (login);
+CREATE UNIQUE INDEX vhosts_domain ON vhosts (domain);
+CREATE INDEX vhosts_aid ON vhosts (aid);
+CREATE INDEX vhost_log_ymd ON vhost_log (ymd);
+CREATE INDEX vmail_log_ymd ON vmail_log (ymd);
+CREATE UNIQUE INDEX virtual_users_user ON vmails (user);
+CREATE INDEX virtual_users_hid ON vmails (hid);
+CREATE INDEX mail_users_aid ON vmails (aid);
+CREATE INDEX virtual_aliases_source ON valias (source);
+CREATE INDEX virtual_aliases_hid ON valias (hid);
+CREATE INDEX mail_aliases_aid ON valias (aid);
+EOS
+

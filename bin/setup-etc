@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# Created: 20151231 - Updated: 20250407
+# Copyright (C) 1995-2025 Mark Constable <mc@netserva.org> (MIT License)
+[[ $1 =~ '-h' ]] && echo "Usage: setup-etc [mysql(default)|sqlite]" && exit 1
+
+if [[ $DTYPE == sqlite ]]; then
+    SQCMD=$EXSQL
+elif [[ $DTYPE == mysql ]]; then
+    SQCMD=$EXMYS
+else
+    echo "### ERROR: unknown argument DTYPE='$DTYPE'" && exit 2
+fi
+
+### Create missing directories
+
+# For Alpine
+if [[ -d $C_WEB/sites-enabled ]]; then
+    echo "### Exists $C_WEB/sites-enabled"
+else
+    echo "### Create $C_WEB/sites-enabled"
+    mkdir $C_WEB/sites-enabled
+fi
+
+if [[ -d /etc/opendkim ]]; then
+    echo "### Exists /etc/opendkim"
+else
+    echo "### Create /etc/opendkim"
+    # mkdir and move to opendkim section
+    dkim list
+fi
+
+if [[ -d $CIMAP ]]; then
+    echo "### Exists $CIMAP"
+else
+    echo "### Create $CIMAP"
+    mkdir $CIMAP
+fi
+
+if [[ -d $CIMAP/vhosts ]]; then
+    echo "### Exists $CIMAP/vhosts"
+else
+    echo "### Create $CIMAP/vhosts"
+    mkdir $CIMAP/vhosts
+fi
+
+if [[ -d $CIMAP/sieve ]]; then
+    echo "### Exists $CIMAP/sieve"
+else
+    echo "### Create $CIMAP/sieve"
+    mkdir $CIMAP/sieve
+fi
+
+### postfix
+
+if [[ -f $CSMTP/main.cf.orig ]]; then
+    echo "### Exists $CSMTP/main.cf.orig"
+else
+    echo "### Create $CSMTP/main.cf for $DTYPE"
+    mv $CSMTP/main.cf $CSMTP/main.cf.orig
+    cp ~/.ns/etc/_etc_postfix_main.cf $CSMTP/main.cf
+    echo "### /^Subject:/      WARN" >$CSMTP/header_checks
+    chmod 644 $CSMTP/main.cf $CSMTP/header_checks
+fi
+
+if [[ -f $CSMTP/master.cf.orig ]]; then
+    echo "### Exists $CSMTP/master.cf.orig"
+else
+    echo "### Create $CSMTP/master.cf"
+    mv $CSMTP/master.cf $CSMTP/master.cf.orig
+    cp ~/.ns/etc/_etc_postfix_master.cf $CSMTP/master.cf
+    chmod 644 $CSMTP/master.cf
+fi
+
+### dovecot
+
+if [[ -f $CIMAP/dovecot.conf.orig ]]; then
+    echo "### Exists $CIMAP/dovecot.conf.orig"
+else
+    echo "### Create $CIMAP/dovecot.conf for $DTYPE"
+    mv -f $CIMAP/dovecot.conf $CIMAP/dovecot.conf.orig
+    cp ~/.ns/etc/_etc_dovecot_dovecot.conf $CIMAP/dovecot.conf
+    chmod 644 $CIMAP/dovecot.conf
+    openssl dhparam -dsaparam -out /etc/dovecot/dh.pem 4096 >/dev/null 2>&1
+fi
+
+### Spamprobe
+
+if [[ -e /usr/bin/spamprobe ]]; then
+    if [[ ! -L $CIMAP/sieve/spamprobe ]]; then
+        echo "### Create $CIMAP/sieve/spamprobe symlink"
+        cd $CIMAP/sieve
+        ln -s /usr/bin/spamprobe $CIMAP/sieve/spamprobe
+    fi
+
+    if [[ ! -f $CIMAP/sieve/retrain-as-good.sieve ]]; then
+        echo "### Create $CIMAP/sieve/retrain-as-good.sieve"
+        cp ~/.ns/etc/_etc_dovecot_sieve_retrain-as-good.sieve $CIMAP/sieve/retrain-as-good.sieve
+    fi
+
+    if [[ ! -f $CIMAP/sieve/retrain-as-spam.sieve ]]; then
+        echo "### Create $CIMAP/sieve/retrain-as-spam.sieve"
+        cp ~/.ns/etc/_etc_dovecot_sieve_retrain-as-spam.sieve $CIMAP/sieve/retrain-as-spam.sieve
+    fi
+
+    if [[ ! -f $CIMAP/sieve/global.sieve ]]; then
+        echo "### Create $CIMAP/sieve/global.sieve"
+        cp ~/.ns/etc/_etc_dovecot_sieve_global.sieve $CIMAP/sieve/global.sieve
+    fi
+else
+    echo "### Exists /usr/bin/spamprobe"
+fi
+
+### nginx
+
+if [[ -f $C_WEB/common.conf ]]; then
+    echo "### Exists $C_WEB/common.conf"
+else
+    echo "### Create $C_WEB/common.conf"
+    cp ~/.ns/etc/_etc_nginx_common.conf $C_WEB/common.conf
+fi
+
+if [[ -f $C_WEB/php.conf ]]; then
+    echo "### Exists $C_WEB/php.conf"
+else
+    echo "### Create $C_WEB/php.conf"
+    cp ~/.ns/etc/_etc_nginx_php.conf $C_WEB/php.conf
+fi
+
+# Not strictly necessary at this point (could be in setup-hcp)
+if [[ -f $C_WEB/hcp.conf ]]; then
+    echo "### Exists $C_WEB/hcp.conf"
+else
+    echo "### Create $C_WEB/hcp.conf"
+    cp ~/.ns/etc/_etc_nginx_hcp.conf $C_WEB/hcp.conf
+fi
+
+if [[ -f $C_WEB/headers.conf ]]; then
+    echo "### Exists $C_WEB/headers.conf"
+else
+    echo "### Create $C_WEB/headers.conf"
+    cp ~/.ns/etc/_etc_nginx_headers.conf $C_WEB/headers.conf
+fi
+
+if [[ -f $C_WEB/nginx.conf.orig ]]; then
+    echo "### Exists $C_WEB/nginx.conf"
+else
+    echo "### Create $C_WEB/nginx.conf"
+    mv $C_WEB/nginx.conf $C_WEB/nginx.conf.orig
+    cp ~/.ns/etc/_etc_nginx_nginx.conf $C_WEB/nginx.conf
+    [[ $OSTYP != ubuntu ]] &&
+        sed -i $C_WEB/nginx.conf -e "s/www-data/$WUGID/"
+fi
+
+if [[ -f $C_WEB/sites-enabled/_localhost ]]; then
+    echo "### Exists $C_WEB/sites-enabled/_localhost"
+else
+    echo "### Create $C_WEB/sites-enabled/_localhost"
+    cp ~/.ns/etc/_etc_nginx_sites-enabled__localhost $C_WEB/sites-enabled/_localhost
+fi
+
+### opendkim and opendmarc
+
+if [[ -f /etc/opendkim.conf.orig ]]; then
+    echo "### Exists /etc/opendkim.conf"
+else
+    echo "### Create /etc/opendkim.conf"
+    touch /etc/opendkim.conf.orig
+    cp ~/.ns/etc/_etc_opendkim.conf /etc/opendkim.conf
+    chown opendkim:opendkim /etc/opendkim.conf
+fi
+
+if [[ -f /etc/opendmarc.conf.orig ]]; then
+    echo "### Exists /etc/opendmarc.conf.orig"
+else
+    echo "### Create /etc/opendmarc.conf"
+    touch /etc/opendmarc.conf.orig
+    cp ~/.ns/etc/_etc_opendmarc.conf /etc/opendmarc.conf
+fi
+
+if [[ $OSTYP != alpine ]]; then
+
+    if [[ -f /etc/systemd/system/opendkim.service ]]; then
+        echo "### Exists /etc/systemd/system/opendkim.service"
+    else
+        echo "### Create /etc/systemd/system/opendkim.service"
+        cp ~/.ns/etc/_etc_systemd_system_opendkim.service /etc/systemd/system/opendkim.service
+        chmod 644 /etc/systemd/system/opendkim.service
+    fi
+
+    if [[ -f /etc/systemd/system/opendmarc.service ]]; then
+        echo "### Exists /etc/systemd/system/opendmarc.service"
+    else
+        echo "### Create /etc/systemd/system/opendmarc.service"
+        cp ~/.ns/etc/_etc_systemd_system_opendmarc.service /etc/systemd/system/opendmarc.service
+        chmod 644 /etc/systemd/system/opendmarc.service
+    fi
+fi
+
+### php
+
+if [[ -f $C_FPM/common.conf ]]; then
+    echo "### Exists $C_FPM/common.conf"
+elif [[ -f /etc/php$V_PHP/common.conf ]]; then
+    echo "### Exists /etc/php$V_PHP/common.conf"
+else
+    echo "### Create $C_FPM/common.conf"
+    if [[ $OSTYP == alpine ]]; then
+        # this won't work until $C_FPM is adjusted as per manjaro
+        cp ~/.ns/etc/_etc_php_7.0_fpm_common.conf /etc/php$V_PHP/common.conf
+        sed -i $C_FPM/common.conf -e 's/www-data/nginx/g'
+    elif [[ $OSTYP == manjaro ]]; then
+        # this may not be right, needs testing
+        cp ~/.ns/etc/_etc_php_7.0_fpm_common.conf $C_FPM/common.conf
+        sed -i $C_FPM/common.conf -e 's/www-data/http/g'
+    else
+        cp ~/.ns/etc/_etc_php_7.0_fpm_common.conf $C_FPM/common.conf
+    fi
+fi
+
+# This section below needs a complete redo and may not be needed in 2025
+
+#if [[ -f $C_FPM/php.ini.orig ]]; then
+#    echo "### Exists $C_FPM/php.ini.orig"
+#else
+#    echo "### Modify $C_FPM/php.ini"
+#    cp $C_FPM/php.ini $C_FPM/php.ini.orig
+#    sed -i $C_FPM/php.ini \
+#        -e 's/;opcache.enable=1/opcache.enable=1/' \
+#        -e 's/;opcache.enable_cli=0/opcache.enable_cli=1/' \
+#        -e 's/;opcache.interned_strings_buffer=8/opcache.interned_strings_buffer=8/' \
+#        -e 's/;opcache.max_accelerated_files=10000/opcache.max_accelerated_files=10000/' \
+#        -e 's/;opcache.memory_consumption=128/opcache.memory_consumption=128/' \
+#        -e 's/;opcache.save_comments=1/opcache.save_comments=1/' \
+#        -e 's/;opcache.revalidate_freq=2/opcache.revalidate_freq=1/' \
+#        -e 's/memory_limit = 128M/memory_limit = 512M/'
+#
+#    if [[ $OSTYP == manjaro ]]; then
+#        sed -i $C_FPM/php.ini \
+#            -e 's/;extension=curl/extension=curl/' \
+#            -e 's/;extension=exif/extension=exif/' \
+#            -e 's/;extension=gd/extension=gd/' \
+#            -e 's/;extension=iconv/extension=iconv/' \
+#            -e 's/;extension=imap/extension=imap/' \
+#            -e 's/;extension=intl/extension=intl/' \
+#            -e 's/;extension=mysqli/extension=mysqli/' \
+#            -e 's/;zend_extension=opcache/zend_extension=opcache/' \
+#            -e 's/;extension=pdo_mysql/extension=pdo_mysql/' \
+#            -e 's/;extension=pdo_sqlite/extension=pdo_sqlite/' \
+#            -e 's/;extension=zip/extension=zip/'
+#
+#        sed -i $C_FPM/conf.d/igbinary.ini -e 's/;extension=igbinary.so/extension=igbinary.so/'
+#        sed -i $C_FPM/conf.d/imagick.ini -e 's/;extension = imagick/extension=imagick/'
+#        sed -i $C_FPM/conf.d/redis.ini -e 's/;extension=redis/extension=redis/'
+#    fi
+#fi
+
+### pdns
+
+if [[ -f $C_DNS/pdns.conf.orig ]]; then
+    echo "### Exists $C_DNS/pdns.conf.orig"
+else
+    echo "### Create $C_DNS/pdns.conf"
+    mv $C_DNS/pdns.conf $C_DNS/pdns.conf.orig
+    cp ~/.ns/etc/_etc_powerdns_pdns.conf $C_DNS/pdns.conf
+    [[ ! -d $C_DNS/pdns.d ]] && mkdir $C_DNS/pdns.d
+    if [[ $OSTYP == alpine ]]; then
+        sed -i $C_DNS/pdns.conf -e 's#/etc/powerdns/pdns.d#/etc/pdns/pdns.d#'
+    fi
+fi
+
+if [[ -f /etc/sudoers.d/99-sysadm ]]; then
+    echo "### Exists /etc/sudoers.d/99-sysadm"
+else
+    echo "### Create /etc/sudoers.d/99-sysadm"
+    cp ~/.ns/etc/_etc_sudoers.d_99-sysadm /etc/sudoers.d/99-sysadm
+    chmod 0440 /etc/sudoers.d/99-sysadm
+fi
+
+if [[ -f $C_SSL/dhparams.pem ]]; then
+    echo "### Exists $C_SSL/dhparams.pem"
+else
+    echo "### Create $C_SSL/dhparams.pem"
+    openssl dhparam -dsaparam -out $C_SSL/dhparams.pem 4096 >/dev/null 2>&1
+fi
+
+if [[ -f $C_WEB/sites-enabled/_default ]]; then
+    echo "### Exists $C_WEB/sites-enabled/_default"
+else
+    echo "### Create $C_WEB/sites-enabled/_default"
+    [[ -L $C_WEB/sites-enabled/default ]] && rm $C_WEB/sites-enabled/default
+    cp ~/.ns/etc/_etc_nginx_sites-enabled__default $C_WEB/sites-enabled/_default
+fi
+
+# Missing from Ubuntu nginx installation
+if [[ -f /usr/share/nginx/html/50x.html ]]; then
+    echo "### Exists /usr/share/nginx/html/50x.html"
+else
+    echo "### Create /usr/share/nginx/html/50x.html"
+    [[ ! -d /usr/share/nginx/html ]] && mkdir -p /usr/share/nginx/html
+    cp ~/.ns/etc/_usr_share_nginx_html_50x.html /usr/share/nginx/html/50x.html
+    chmod 644 /usr/share/nginx/html/50x.html
+fi
+

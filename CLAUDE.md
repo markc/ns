@@ -152,8 +152,65 @@ $EXSQL             # SQLite execution
 - Install: Run `setup-ns` script
 - Management: `ns <command>` - unified command interface
 
+## Documentation & Configuration Sanitization
+
+### Public vs Private Content
+This repository is intended for public GitHub. All documentation and configuration files must be sanitized:
+
+#### Directory Structure:
+- `doc/` - Public sanitized documentation
+- `doc/private/` - Real configurations (gitignored)
+- `man/` - Public sanitized manual pages  
+- `man/private/` - Real manual pages (gitignored)
+- `etc/` - Public sanitized config templates
+- `etc/private/` - Real config files (gitignored)
+
+#### Sanitization Rules:
+1. Replace real domain names with example.com, example.net, example.org
+2. Replace real IPs with 192.168.100.0/24 range
+3. Use placeholder variables prefixed with underscore (e.g., `_MAIL_IP`, `_DB_PASSWORD`)
+4. Include sed replacement examples in docs for deployment
+
+#### Example Placeholders:
+- `_DOMAIN` - Primary domain
+- `_MAIL_IP` - Mail server IP
+- `_DB_HOST` - Database hostname
+- `_DB_PASSWORD` - Database password
+- `_SSH_KEY` - SSH key path
+
+#### Deployment Example:
+```bash
+# Replace placeholders during deployment
+sed -i 's/_DOMAIN/yourdomain.com/g' config.conf
+sed -i 's/_MAIL_IP/192.168.1.244/g' config.conf
+```
+
+### Private Documentation:
+Store real-world configurations in `*/private/` subdirectories. These are gitignored and contain:
+- Actual domain names and IPs
+- Real passwords and keys
+- Production configurations
+- Network topology details
+
+#### Critical `doc/private/` Policy:
+Each VM/CT/VPS installation MUST have a corresponding documentation file:
+- **Naming**: `doc/private/<vhost>.md` where `<vhost>` is the SSH host config name
+- **Purpose**: Maintain detailed analysis and memory of each server over time
+- **Content**: Real configurations, troubleshooting history, network details, passwords
+- **Examples**:
+  - `doc/private/haproxy.md` - HAProxy container documentation
+  - `doc/private/mgo.md` - mail.goldcoast.org server documentation
+  - `doc/private/trixie.md` - trixie.goldcoast.org server documentation
+  - `doc/private/nsorg.md` - mail.netserva.org server documentation
+- This creates a persistent knowledge base for each server that grows over time
+
 ## Important Instructions
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
-NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+ALWAYS proactively create documentation files in doc/ and man/ folders when implementing new features or making significant changes:
+- Create sanitized public docs in `doc/` with example domains and placeholder variables
+- Store real-world examples in `doc/private/` (gitignored)
+- Man pages in `man/` should ALWAYS be generic enough to not need private versions
+- Follow the sanitization rules above for all public-facing documentation
+ALWAYS sanitize sensitive information in public-facing files using the rules above.

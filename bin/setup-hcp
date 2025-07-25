@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Created: 20170519 - Updated: 20250418
+# Copyright (C) 1995-2025 Mark Constable <mc@netserva.org> (MIT License)
+set -x
+[[ $1 =~ '-h' ]] && echo "Usage: setup-hcp [domain]" && exit 1
+
+[[ $(id -u) -gt 0 ]] && echo "ERROR: must be root (use sudo -i)" && exit 2
+
+MHOST=${1:-$(hostname -f | tr 'A-Z' 'a-z')} # install into primary vhost
+
+[[ -f ~/.vhosts/$MHOST ]] && . ~/.vhosts/$MHOST || exit 3
+
+
+if [[ -d $WPATH/hcp ]]; then
+    echo "### Exists $WPATH/hcp"
+else
+    echo "### Clone Netserva HCP to $WPATH/hcp"
+    git clone https://github.com/markc/hcp $WPATH/hcp >/dev/null 2>&1
+    APASS_HASH=$(php -r "echo password_hash('$APASS', PASSWORD_DEFAULT);")
+    cat <<EOS | $SQCMD
+ INSERT INTO accounts VALUES
+        (null,1,0,1,'$AMAIL','System','Administrator','','',0,'','$APASS_HASH','2018-01-01 00:00:01','2018-01-01 00:00:01');
+EOS
+    if [[ -f $WPATH/hcp/.htpasswd ]]; then
+        echo "### Exists $WPATH/hcp/.htpasswd"
+    else
+        HUSER=$(newpw 1 8)
+        HPASS=$(newpw 1 8)
+        echo "### Create $WPATH/hcp/.htpasswd $HUSER/$HPASS"
+        htpasswd -b -c $WPATH/hcp/.htpasswd $HUSER $HPASS >/dev/null 2>&1
+        echo "# HTTP auth for https://$MHOST/html/hcp -> $HUSER / $HPASS" >>~/.my.cnf
+        cat <<EOS | tee -a /root/.vhosts/$MHOST.conf >/dev/null
+HTTP Auth
+=========
+
+AdminWeb: https://$MHOST/hcp
+Username: $HUSER
+Password: $HPASS
+
+EOS
+    fi
+
+    echo "### Create default $DTYPE entries"
+    cat <<EOS | tee -a /root/.vhosts/$MHOST.conf >/dev/null
+HCP Auth
+=========
+
+AdminWeb: https://$MHOST/hcp/?o=auth
+Username: $AMAIL
+Password: $APASS
+
+EOS
+fi
+
+if [[ -f $WPATH/.well-known/autodiscover.php ]]; then
+    echo "### Exists $WPATH/.well-known/autodiscover.php"
+else
+    echo "### Setup $WPATH/.well-known/autodiscover.php with $MHOST"
+    [[ ! -d $WPATH/.well-known ]] && mkdir -p $WPATH/.well-known
+    cp ~/.sh/etc/_.well-known_autodiscover.php $WPATH/.well-known/autodiscover.php
+fi
+
+# Even if SQLite is the default, this is so switching to MySQL has a chance
+# of working when index.php db=>type is dynamically changed to "mysql".
+if [[ -f $WPATH/hcp/lib/.ht_pw ]]; then
+    echo "### Exists $WPATH/hcp/lib/.ht_pw"
+else
+    echo "### Create $WPATH/hcp/lib/.ht_pw"
+    echo $DPASS >$WPATH/hcp/lib/.ht_pw
+fi
+
+if [[ -f $WPATH/hcp/lib/.ht_conf.php ]]; then
+    echo "### Exists $WPATH/hcp/lib/.ht_conf.php"
+else
+    echo "### Create $WPATH/hcp/lib/.ht_conf.php for '$DTYPE' (edit to modify/extend)"
+    TPDNS=
+    TMPDB=
+    if [[ $DTYPE == mysql ]]; then
+        TMPDB="['type' => 'mysql', 'pass' => '$DPASS']"
+        TPDNS="
+    'dns' => [
+        'db' => [
+            'host'  => '127.0.0.1',
+            'name'  => 'pdns',
+            'pass'  => '$DPASS',
+            'path'  => '',
+            'port'  => '3306',
+            'sock'  => '',
+            'type'  => 'mysql',
+            'user'  => 'sysadm',
+        ],
+    ]"
+    elif [[ $DTYPE == sqlite ]]; then
+        TMPDB="['type' => 'sqlite']"
+        TPDNS="
+    'dns' => [
+        'db' => [
+            'pass'  => '',
+            'path'  => '/var/lib/sqlite/sysadm/pdns.db',
+            'type'  => 'sqlite',
+            'user'  => '',
+        ],
+    ]"
+    fi
+    [[ $TMPDB ]] && echo "<?php
+return [
+    'cfg' => ['email' => '$ADMIN@$VHOST'],
+    'db' => $TMPDB,
+    'out' => [
+        'doc'   => '$VHOST',
+        'head'  => '$VHOST',
+        'foot'  => 'Copyright (C) ' . date('Y') . ' $VHOST',
+    ],$TPDNS
+];
+" >$WPATH/hcp/lib/.ht_conf.php
+fi
+
+setup-pma $MHOST
+setup-rc $MHOST
+chperms $MHOST
+serva restart web
+serva restart mail
+sleep 2
+

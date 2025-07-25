@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Check if container name was provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $(basename "$0") <container-name>"
+    echo ""
+    echo "Check the status of an incus container and its mount"
+    echo ""
+    echo "Shows:"
+    echo "  - SSH configuration status"
+    echo "  - Container running status"
+    echo "  - Filesystem mount status"
+    echo "  - SSH connectivity test"
+    echo "  - Mount point contents"
+    echo ""
+    echo "Example:"
+    echo "  $(basename "$0") webserver"
+    exit 1
+fi
+
+CONTAINER_NAME="$1"
+MOUNT_POINT="$HOME/Dev/ns/$CONTAINER_NAME"
+SSH_CONFIG="$HOME/.ssh/config.d/$CONTAINER_NAME"
+
+echo "=== $CONTAINER_NAME Container Status ==="
+
+# Check if SSH config exists
+echo -n "SSH Config: "
+if [ -f "$SSH_CONFIG" ]; then
+    echo "FOUND"
+else
+    echo "NOT FOUND (required at $SSH_CONFIG)"
+fi
+
+# Check if container is running
+echo -n "Container Status: "
+if incus info "$CONTAINER_NAME" 2>/dev/null | grep -q "Status: RUNNING"; then
+    echo "RUNNING"
+else
+    echo "STOPPED or NOT FOUND"
+fi
+
+# Check if mounted
+echo -n "Filesystem Mount: "
+if mountpoint -q "$MOUNT_POINT"; then
+    echo "MOUNTED"
+    df -h "$MOUNT_POINT" | tail -1 | awk '{print "  Size: " $2 ", Used: " $3 " (" $5 "), Available: " $4}'
+else
+    echo "NOT MOUNTED"
+fi
+
+# Check SSH connectivity (only if SSH config exists)
+if [ -f "$SSH_CONFIG" ]; then
+    echo -n "SSH Connectivity: "
+    if ssh -o ConnectTimeout=2 -o BatchMode=yes "$CONTAINER_NAME" exit 2>/dev/null; then
+        echo "AVAILABLE"
+        echo "  Container hostname: $(ssh "$CONTAINER_NAME" hostname)"
+        echo "  Container uptime: $(ssh "$CONTAINER_NAME" uptime | cut -d, -f1)"
+    else
+        echo "NOT AVAILABLE"
+    fi
+fi
+
+# Show mount point contents
+if [ -d "$MOUNT_POINT" ]; then
+    echo ""
+    echo "Mount point contents:"
+    ls -la "$MOUNT_POINT" | head -10
+    if [ $(ls "$MOUNT_POINT" | wc -l) -gt 8 ]; then
+        echo "  ... (showing first 8 items)"
+    fi
+fi

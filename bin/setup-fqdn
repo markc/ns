@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+# Created: 20210327 - Updated: 20250410
+# Copyright (C) 1995-2025 Mark Constable <mc@netserva.org> (MIT License)
+
+[[ $1 =~ '-h' ]] && echo "Usage: setup-fqdn [domain]" && exit 1
+
+# Source NetServa functions
+[[ -f ~/.ns/lib/functions.sh ]] && source ~/.ns/lib/functions.sh || { echo "Error: Cannot find ~/.ns/lib/functions.sh"; exit 1; }
+[[ -f ~/.ns/lib/setup_core.sh ]] && source ~/.ns/lib/setup_core.sh || { echo "Error: Cannot find ~/.ns/lib/setup_core.sh"; exit 1; }
+
+# Temporary self-signed SSL certificate defaults
+C="AU"
+ST="QLD"
+L="GoldCoast"
+O="NetServa"
+OU="IT Department"
+
+gethost
+
+[[ ! -d ~/.vhosts ]] && mkdir ~/.vhosts
+
+_1000=$(getent passwd 1000)
+
+echo $_1000 | grep "^sysadm:x:1000:1000:$MHOST:/home/u/$MHOST:/bin/bash" >/dev/null
+
+if [[ $? -eq 0 ]]; then
+    echo "### Exists $_1000"
+else
+    _SADM=$(echo $_1000 | awk -F: '{print $1}')
+    if [[ $_SADM ]]; then
+        echo "### Remove current UID 1000 user '$_SADM'"
+        userdel -rf $_SADM
+    fi
+    echo "### Create vhost $MHOST"
+    addvhost $MHOST
+fi
+
+. ~/.vhosts/$MHOST
+
+if [[ -f /etc/hosts.orig ]]; then
+    echo "### Exists /etc/hosts.orig"
+else
+    cp /etc/hosts /etc/hosts.orig
+    echo "### Update /etc/hosts"
+    sed -i "s/^127.0.1.1.*$/127.0.1.1\tresolved/" /etc/hosts
+
+    # Rely on local or remote DNS lookup instead
+    #grep -q "$IP4_0\t$MHOST $HNAME" /etc/hosts
+    #if [[ $? -gt 0 ]]; then
+    #    echo -e "\n$IP4_0\t$MHOST $HNAME" >>/etc/hosts
+    #fi
+
+    echo "### Append domain search to /etc/resolv.conf"
+    if [[ -f /etc/systemd/resolved.conf ]]; then
+        if [[ ${IP4_0} == 192.168.1* ]]; then
+            # Special case for typical LAN
+            _dns = 192.168.1.1
+        else
+            # General case which should always work
+            _dns = 1.1.1.1
+        fi
+        sed -i /etc/systemd/resolved.conf \
+            -e "s/^#Domains=/Domains=$HDOMN/" \
+            -e "s/^#DNS=/DNS=$_dns/"
+        sc restart systemd-resolved
+    else
+        cat <<EOS >>/etc/resolv.conf
+search $HDOMN
+EOS
+    fi
+    echo $HNAME >/etc/hostname
+    hostname $HNAME
+    echo $MHOST >/etc/mailname
+fi
+
+echo "### Update FQDN in $CSMTP/main.cf"
+sed -i $CSMTP/main.cf \
+    -e "s/^#myhostname = _MHOST/myhostname = $MHOST/" \
+    -e "s/_MHOST/$MHOST/"
+
+echo "### Update FQDN in $CIMAP/dovecot.conf"
+sed -i $CIMAP/dovecot.conf \
+    -e "s/_MHOST/$MHOST/" \
+    -e "s/_VHOST/$VHOST/"
+
+if [[ $DTYPE == sqlite ]]; then
+
+    if [[ ! -f $CSMTP/sqlite-alias-maps.cf ]]; then
+        echo "### Create $CSMTP/sqlite-alias-maps.cf"
+        cp ~/.ns/etc/_etc_postfix_sqlite-alias-maps.cf $CSMTP/sqlite-alias-maps.cf
+        sed -i $CSMTP/sqlite-alias-maps.cf \
+            -e "s;_DPATH;$DPATH;"
+        chmod 644 $CSMTP/sqlite-alias-maps.cf
+    fi
+
+    if [[ ! -f $CSMTP/sqlite-mailbox-domains.cf ]]; then
+        echo "### Create $CSMTP/sqlite-mailbox-domains.cf"
+        cp ~/.ns/etc/_etc_postfix_sqlite-mailbox-domains.cf $CSMTP/sqlite-mailbox-domains.cf
+        sed -i $CSMTP/sqlite-mailbox-domains.cf \
+            -e "s;_DPATH;$DPATH;"
+        chmod 644 $CSMTP/sqlite-mailbox-domains.cf
+    fi
+
+    if [[ ! -f $CSMTP/sqlite-mailbox-maps.cf ]]; then
+        echo "### Create $CSMTP/sqlite-mailbox-maps.cf"
+        cp ~/.ns/etc/_etc_postfix_sqlite-mailbox-maps.cf $CSMTP/sqlite-mailbox-maps.cf
+        sed -i $CSMTP/sqlite-mailbox-maps.cf \
+            -e "s;_DPATH;$DPATH;"
+        chmod 644 $CSMTP/sqlite-mailbox-maps.cf
+    fi
+
+    if [[ ! -f $CIMAP/user-sqlite.conf ]]; then
+        echo "### Create $CIMAP/user-sqlite.conf"
+        cp ~/.ns/etc/_etc_dovecot_user-sqlite.conf $CIMAP/user-sqlite.conf
+        sed -i $CIMAP/user-sqlite.conf \
+            -e "s;_DTYPE;$DTYPE;" \
+            -e "s;_DPATH;$DPATH;"
+        chmod 644 $CIMAP/user-sqlite.conf
+    fi
+
+    if [[ ! -f $C_DNS/pdns.d/sqlite.conf ]]; then
+        echo "### Create $C_DNS/pdns.d/sqlite.conf"
+        cp ~/.ns/etc/_etc_powerdns_pdns_sqlite.conf $C_DNS/pdns.d/sqlite.conf
+    fi
+
+    grep -q virtual_alias_maps $CSMTP/main.cf
+    if [[ $? -gt 0 ]]; then
+        echo "### Append SQLite details to $CSMTP/main.cf"
+        cat ~/.ns/etc/_etc_postfix_main_sqlite.cf >>$CSMTP/main.cf
+    fi
+
+    grep -q passdb $CSMTP/main.cf
+    if [[ $? -gt 0 ]]; then
+        echo "### Append SQLite details to $CIMAP/dovecot.conf"
+        cat ~/.ns/etc/_etc_dovecot_dovecot.conf-sqlite >>$CIMAP/dovecot.conf
+    fi
+
+elif [[ $DTYPE == mysql ]]; then
+
+    if [[ ! -f $CSMTP/mysql-alias-maps.cf ]]; then
+        echo "### Create $CSMTP/mysql-alias-maps.cf"
+        cp ~/.ns/etc/_etc_postfix_mysql-alias-maps.cf $CSMTP/mysql-alias-maps.cf
+        sed -i $CSMTP/mysql-alias-maps.cf \
+            -e "s/_DHOST/$DHOST/" \
+            -e "s/_DNAME/$ADMIN/" \
+            -e "s/_DUSER/$ADMIN/" \
+            -e "s/_DPASS/$DPASS/"
+        chmod 644 $CSMTP/mysql-alias-maps.cf
+    fi
+
+    if [[ ! -f $CSMTP/mysql-mailbox-domains.cf ]]; then
+        echo "### Create $CSMTP/mysql-mailbox-domains.cf"
+        cp ~/.ns/etc/_etc_postfix_mysql-mailbox-domains.cf $CSMTP/mysql-mailbox-domains.cf
+        sed -i $CSMTP/mysql-mailbox-domains.cf \
+            -e "s/_DHOST/$DHOST/" \
+            -e "s/_DNAME/$ADMIN/" \
+            -e "s/_DUSER/$ADMIN/" \
+            -e "s/_DPASS/$DPASS/"
+        chmod 644 $CSMTP/mysql-mailbox-domains.cf
+    fi
+
+    if [[ ! -f $CSMTP/mysql-mailbox-maps.cf ]]; then
+        echo "### Create $CSMTP/mysql-mailbox-maps.cf"
+        cp ~/.ns/etc/_etc_postfix_mysql-mailbox-maps.cf $CSMTP/mysql-mailbox-maps.cf
+        sed -i $CSMTP/mysql-mailbox-maps.cf \
+            -e "s/_DHOST/$DHOST/" \
+            -e "s/_DNAME/$ADMIN/" \
+            -e "s/_DUSER/$ADMIN/" \
+            -e "s/_DPASS/$DPASS/"
+        chmod 644 $CSMTP/mysql-mailbox-maps.cf
+    fi
+
+    if [[ ! -f $CIMAP/user-mysql.conf ]]; then
+        echo "### Create $CIMAP/user-mysql.conf"
+        cp ~/.ns/etc/_etc_dovecot_user-mysql.conf $CIMAP/user-mysql.conf
+        sed -i $CIMAP/user-mysql.conf \
+            -e "s/_DTYPE/$DTYPE/" \
+            -e "s/_DHOST/$DHOST/" \
+            -e "s/_DNAME/$ADMIN/" \
+            -e "s/_DUSER/$ADMIN/" \
+            -e "s/_DPASS/$DPASS/"
+        chmod 644 $CIMAP/user-mysql.conf
+    fi
+
+    if [[ ! -f $C_DNS/pdns.d/mysql.conf ]]; then
+        echo "### Create $C_DNS/pdns.d/mysql.conf"
+        cp ~/.ns/etc/_etc_powerdns_pdns_mysql.conf $C_DNS/pdns.d/mysql.conf
+        sed -i $C_DNS/pdns.d/mysql.conf \
+            -e "s/_PDNS_USER/$DUSER/" \
+            -e "s/_PDNS_PASS/$DPASS/"
+    fi
+
+    grep -q virtual_alias_maps $CSMTP/main.cf
+    if [[ $? -gt 0 ]]; then
+        echo "### Append MySQL details to $CSMTP/main.cf"
+        cat ~/.ns/etc/_etc_postfix_main_mysql.cf >>$CSMTP/main.cf
+    fi
+
+    grep -q passdb $CSMTP/main.cf
+    if [[ $? -gt 0 ]]; then
+        echo "### Append MySQL details to $CIMAP/dovecot.conf"
+        cat ~/.ns/etc/_etc_dovecot_dovecot.conf-mysql >>$CIMAP/dovecot.conf
+    fi
+
+else
+    echo "### Warning: Unknown DTYPE '$DTYPE'"
+fi
+
+echo "### Update _MHOST in $C_WEB/sites-enabled/_default"
+sed -i $C_WEB/sites-enabled/_default -e "s/_MHOST/$MHOST/g"
+
+echo "### Update 0.0.0.0 in $C_DNS/pdns.conf"
+sed -i $C_DNS/pdns.conf -e "s/0\.0\.0\.0/$IP4_0/"
+
+if [[ $OSTYP == alpine ]]; then
+    if [[ ! -f /etc/periodic/daily/netserva ]]; then
+        echo "### Create /etc/periodic/daily/netserva"
+        cp ~/.ns/etc/_etc_cron.d_netserva /etc/periodic/daily/netserva
+        MTEMP=${MAILTO:-$AMAIL}
+        sed -i "s/_MAILTO/$MTEMP/" /etc/periodic/daily/netserva
+    fi
+else
+    if [[ ! -f /etc/cron.d/netserva ]]; then
+        echo "### Create /etc/cron.d/netserva"
+        cp ~/.ns/etc/_etc_cron.d_netserva /etc/cron.d/netserva
+        MTEMP=${MAILTO:-$AMAIL}
+        sed -i "s/_MAILTO/$MTEMP/" /etc/cron.d/netserva
+    fi
+fi
+
+if [[ ! -d $C_SSL/$MHOST ]]; then
+    echo "### Create temporary self-signed certificate for $MHOST"
+    [[ ! -d $C_SSL/$MHOST ]] && mkdir $C_SSL/$MHOST
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -subj "/C=$C/ST=$ST/L=$L/O=$O/OU=$OU/CN=$MHOST" \
+        -keyout /etc/ssl/$MHOST/privkey.pem \
+        -out /etc/ssl/$MHOST/fullchain.pem >/dev/null 2>&1
+
+    if [[ ! -f $C_WEB/sites-enabled/$MHOST.selfsigned ]]; then
+        cat <<EOS | tee $C_WEB/sites-enabled/$MHOST.selfsigned >/dev/null
+server {
+    listen                      443 ssl http2;
+    server_name                 $MHOST;
+    include                     /etc/nginx/hcp.conf;
+    include                     /etc/nginx/common.conf;
+    ssl_certificate             $C_SSL/$MHOST/fullchain.pem;
+    ssl_certificate_key         $C_SSL/$MHOST/privkey.pem;
+    ssl_stapling                off;
+    ssl_stapling_verify         off;
+}
+EOS
+    fi
+fi
+
+if [[ ! -f $CSMTP/vhosts/$MHOST ]]; then
+    # default to 0.0.0.0, create delvip to remove and change to a real IP
+    addvip $MHOST 0.0.0.0
+fi
+
+if [[ ! -f /etc/aliases.lmdb ]]; then
+    echo "### Create lmdb:/etc/aliases"
+    echo '' >/etc/aliases
+    postmap lmdb:/etc/aliases
+    [[ -f /etc/aliases.db ]] && rm /etc/aliases.db
+fi
+
+[[ -e /usr/bin/systemctl ]] && sc daemon-reload >/dev/null 2>&1
+
+if [[ $OSTYP == alpine || $OSTYP == manjaro ]]; then
+    sc restart sshd
+else
+    sc restart ssh
+fi
+
+if [[ ! $HDOMN =~ local ]]; then
+    if [[ -e /usr/sbin/opendkim ]]; then
+        sc enable opendkim >/dev/null 2>&1
+        sc restart opendkim
+    fi
+
+    if [[ -e /usr/sbin/opendmarc ]]; then
+        sc enable opendmarc >/dev/null 2>&1
+        sc restart opendmarc
+    fi
+fi
+
+if [[ $OSTYP == alpine ]]; then
+    _fpm="php-fpm$V_PHP"
+else
+    _fpm="php$V_PHP-fpm"
+fi
+
+sc restart nginx
+sc restart $_fpm
+sc restart postfix
+sc restart dovecot
+
+# TODO: replace spamprobe with bogofilter (at least on Alpine)
+if [[ -e /usr/bin/spamprobe ]]; then
+    if [[ ! -d $CIMAP/sieve/global.svbin ]]; then
+        echo "### Create sieve binaries for spamprobe"
+        cd $CIMAP/sieve
+        sievec global.sieve
+        sievec retrain-as-spam.sieve
+        sievec retrain-as-good.sieve
+        chmod 644 *.svbin
+    fi
+fi
+
+if [[ -e /usr/bin/drill ]]; then
+    DIGIP=$(drill $MHOST | awk "/^$MHOST/ {print \$5}")
+elif [[ -e /usr/bin/host ]]; then
+    DIGIP=$(host $MHOST | awk '{print $4}')
+elif [[ -e /usr/bin/dig ]]; then
+    DIGIP=$(dig +short $MHOST)
+else
+    DIGIP=
+fi
+
+if [[ $IP4_0 =~ ^(192\.168|127\.|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.) ]]; then
+    cat <<EOS
+
+Using private network IP so leave self-signed cert in place for $MHOST.
+You may need to manually add LetsEncrypt certificates when this server
+can be accessed from the upstream LetsEncrypt SSL authorization servers.
+
+    newssl $MHOST
+    newssl $HDOMN www autoconfig autodiscover
+    nginx -t && nginx -s reload
+
+EOS
+else
+    if [[ "$DIGIP" == "$IP4_0" ]]; then
+        newssl $MHOST
+        newssl $HDOMN www autoconfig autodiscover
+        nginx -t && nginx -s reload >/dev/null
+    fi
+fi
+
+if [[ "$DIGIP" != "$IP4_0" ]]; then
+    echo -e "
+Warning: you need to set up DNS records for $MHOST (example)
+
+$HDOMN\t300\tIN\tA\t$IP4_0
+$HDOMN\t300\tIN\tMX\t10 $MHOST.
+$MHOST\t300\tIN\tA\t$IP4_0
+$HDOMN\t300\tIN\tTXT\t\"v=spf1 ip4:$IP4_0/32 -all\"
+$HDOMN\t300\tIN\tCAA\t0 issue \"letsencrypt.org\"
+"
+fi
+

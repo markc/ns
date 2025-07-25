@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Check if container name was provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $(basename "$0") <container-name>"
+    echo ""
+    echo "Debug SSH connectivity to an incus container"
+    echo ""
+    echo "Tests:"
+    echo "  - SSH configuration file"
+    echo "  - SSH connection"
+    echo "  - Container status and IP"
+    echo "  - Network connectivity (ping/netcat)"
+    echo "  - Verbose SSH debug output"
+    echo ""
+    echo "Requirements:"
+    echo "  - SSH config must exist at ~/.ssh/config.d/<container-name>"
+    echo ""
+    echo "Example:"
+    echo "  $(basename "$0") webserver"
+    exit 1
+fi
+
+CONTAINER_NAME="$1"
+SSH_CONFIG="$HOME/.ssh/config.d/$CONTAINER_NAME"
+
+echo "=== SSH Connectivity Debug for $CONTAINER_NAME ==="
+
+# Check if SSH config exists
+echo "1. SSH Config check:"
+if [ -f "$SSH_CONFIG" ]; then
+    echo "   Config found at: $SSH_CONFIG"
+    echo "   Config contents:"
+    grep -E "Host|HostName|User|Port" "$SSH_CONFIG" | sed 's/^/   /'
+else
+    echo "   ERROR: SSH config not found at $SSH_CONFIG"
+    echo ""
+    echo "   Please create an SSH host configuration for '$CONTAINER_NAME' container"
+    echo "   Example config file ($SSH_CONFIG):"
+    echo "     Host $CONTAINER_NAME"
+    echo "       HostName <container-ip>"
+    echo "       User root"
+    echo "       StrictHostKeyChecking no"
+    echo "       UserKnownHostsFile /dev/null"
+    echo ""
+    echo "   You can get the container IP with: incus info $CONTAINER_NAME | grep IPV4"
+    exit 1
+fi
+
+echo ""
+echo "2. Testing SSH connection to $CONTAINER_NAME:"
+ssh -o ConnectTimeout=5 -v "$CONTAINER_NAME" exit 2>&1 | grep -E "(connect|Connecting|Connected|denied|refused)"
+
+echo ""
+echo "3. Container status:"
+if incus info "$CONTAINER_NAME" 2>/dev/null | grep -E "(Status|IPV4)"; then
+    # Get IP from container info
+    CONTAINER_IP=$(incus info "$CONTAINER_NAME" 2>/dev/null | grep -E "IPV4" | head -1 | awk '{print $2}')
+    if [ -n "$CONTAINER_IP" ]; then
+        echo ""
+        echo "4. Testing with nc (netcat) to $CONTAINER_IP:"
+        nc -z -w 2 "$CONTAINER_IP" 22 && echo "   Port 22 is open" || echo "   Port 22 is closed/filtered"
+        
+        echo ""
+        echo "5. Testing ping to $CONTAINER_IP:"
+        ping -c 2 -W 2 "$CONTAINER_IP" >/dev/null 2>&1 && echo "   Host is reachable" || echo "   Host is not reachable"
+    fi
+else
+    echo "   Container '$CONTAINER_NAME' not found or not running"
+fi
+
+echo ""
+echo "6. Full SSH test with verbose output:"
+ssh -vvv -o ConnectTimeout=5 "$CONTAINER_NAME" exit 2>&1 | head -20
