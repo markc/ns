@@ -1,4 +1,4 @@
-# NetServa - Server Management System
+# ⚙️ NetServa - Server Management System
 
 **A unified bash-based toolkit for managing Virtual Machines, LXC Containers, and VPS servers**
 
