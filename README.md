@@ -2,6 +2,18 @@
 
 **A unified bash-based toolkit for managing Virtual Machines, LXC Containers, and VPS servers**
 
+## Quick Installation
+
+**⚠️ Always review scripts before running them directly from the internet**
+
+```bash
+# Review the installer first:
+curl -s https://raw.githubusercontent.com/markc/ns/main/bin/setup-ns
+
+# Then install:
+curl -s https://raw.githubusercontent.com/markc/ns/main/bin/setup-ns | bash
+```
+
 ---
 
 ## What is NetServa?
