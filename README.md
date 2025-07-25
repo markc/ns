@@ -2,23 +2,25 @@
 
 **A unified bash-based toolkit for managing Virtual Machines, LXC Containers, and VPS servers**
 
-## Quick Installation
-
-**⚠️ Always review scripts before running them directly from the internet**
-
-```bash
-# Review the installer first:
-curl -s https://raw.githubusercontent.com/markc/ns/main/bin/setup-ns
-
-# Then install:
-curl -s https://raw.githubusercontent.com/markc/ns/main/bin/setup-ns | bash
-```
-
 ---
 
 ## What is NetServa?
 
 NetServa is a comprehensive server management system designed for system administrators who need to efficiently manage multiple servers, containers, and services across different platforms. Built with modern bash scripting principles, it provides a unified command-line interface that abstracts the complexity of managing diverse server environments.
+
+## Quick Installation
+
+**⚠️ Always review scripts before running them directly from the internet**
+
+Review the installer first:
+```bash
+curl -s https://raw.githubusercontent.com/markc/ns/main/bin/setup-ns
+```
+
+Then install:
+```bash
+curl -s https://raw.githubusercontent.com/markc/ns/main/bin/setup-ns | bash
+```
 
 ### Key Platforms Supported
 - **Incus/LXD** - Modern LXC container management
