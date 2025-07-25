@@ -8,11 +8,15 @@
 NSDIR="$HOME/.ns"
 NSREPO="https://github.com/markc/ns"
 
-if [[ -d "$NSDIR" ]]; then
+if [[ -d "$NSDIR" && -d "$NSDIR/.git" ]]; then
     echo "Updating NetServa scripts..."
     cd "$NSDIR" || exit 1
     git pull --rebase=false
     echo "NetServa updated successfully"
+elif [[ -d "$NSDIR" ]]; then
+    echo "Warning: $NSDIR exists but is not a git repository"
+    echo "Please remove $NSDIR and run this script again, or manually update"
+    exit 1
 elif [[ ! -e /usr/bin/git ]]; then
     echo "Error: git is not installed. Please install git first." >&2
     exit 1
